@@ -211,6 +211,10 @@
   #tools { display: flex; gap: 2px; }
   #tools .tool { font-size: 15px; padding: 4px 9px; color: var(--dim); }
   #tools .tool.on { color: #fff; background: #24456e; }
+  #sort-box { display: flex; align-items: center; gap: 2px; }
+  #sort-box[hidden] { display: none; }
+  #sort-key { background: #1b1b1b; color: var(--text); border: 1px solid #333; border-radius: 6px; padding: 3px 6px; font: inherit; font-size: 13px; }
+  #pathbar #sort-dir { font-size: 15px; padding: 4px 8px; color: var(--dim); }
   #task-button { position: relative; }
   #task-button.busy { color: #fff; }
   #task-button.busy::after { content: attr(data-count); position: absolute; top: -3px; right: -3px; min-width: 15px; height: 15px;
@@ -820,8 +824,33 @@ function visibleFiles() {
 // files the grid shows: AI/album filter and favorites applied, then edited copies (name_edit.png) stacked under
 // their original (item.versions) when grouping is on
 const EDIT_RE = /^(.+)_edit\d*\.[^.]+$/;
+// sorting: key + direction, remembered per folder (a new folder starts with the last choice)
+const SORTS = [['mtime', '수정 날짜'], ['taken', '촬영 날짜'], ['name', '이름'], ['bytes', '파일 크기'], ['pixels', '해상도'], ['rating', '별점']];
+const nameOrder = new Intl.Collator('ko', { numeric: true, sensitivity: 'base' });
+function currentSort() {
+  const saved = JSON.parse(localStorage.getItem('sortByDir') || '{}');
+  return saved[state.dir] || JSON.parse(localStorage.getItem('sortLast') || 'null') || { key: 'mtime', desc: true };
+}
+function setSort(sort) {
+  const saved = JSON.parse(localStorage.getItem('sortByDir') || '{}');
+  saved[state.dir] = sort;
+  localStorage.setItem('sortByDir', JSON.stringify(saved));
+  localStorage.setItem('sortLast', JSON.stringify(sort));
+  masonry.target = BATCH;
+  render();
+  $('grid-wrap').scrollTop = 0;
+}
+function sortFiles(files) {
+  const { key, desc } = currentSort();
+  const value = f => key === 'pixels' ? f.w * f.h : key === 'rating' ? f.rating || 0 : f[key] ?? 0;
+  const byName = (a, b) => nameOrder.compare(a.name, b.name);
+  return [...files].sort((a, b) => {
+    const order = key === 'name' ? byName(a, b) : value(a) - value(b) || byName(a, b) * (desc ? -1 : 1);
+    return desc ? -order : order;  // ties stay in name order either way
+  });
+}
 function displayItems() {
-  let files = visibleFiles();
+  let files = sortFiles(visibleFiles());
   if (state.onlyFav) files = files.filter(f => f.fav);
   if (!state.group) return files;
   const stems = new Map(files.filter(f => !EDIT_RE.test(f.name)).map(f => [f.name.replace(/\.[^.]+$/, ''), f]));
@@ -886,6 +915,13 @@ function renderPath() {
       load(inTrash() ? state.beforeTrash || '' : TRASH_DIR);
     }), { className: `tool${inTrash() ? ' on' : ''}${state.trashed ? ' full' : ''}` }));
   // in the trash only the 🗑 button (the way back) is offered; nothing else applies to deleted photos
+  const sort = currentSort();
+  const sortSelect = build('select', { id: 'sort-key', title: '정렬 기준', onchange: e => setSort({ ...currentSort(), key: e.target.value }) },
+    SORTS.map(([key, label]) => build('option', { value: key, textContent: label, selected: key === sort.key }, [])));
+  const sortDir = build('button', { id: 'sort-dir', className: 'tool', textContent: sort.desc ? '↓' : '↑',
+    title: sort.desc ? '내림차순 (클릭하면 오름차순)' : '오름차순 (클릭하면 내림차순)',
+    onclick: () => setSort({ ...currentSort(), desc: !currentSort().desc }) }, []);
+  const sortBox = build('span', { id: 'sort-box', hidden: inTrash() }, [sortSelect, sortDir]);
   const tools = inTrash() ? [trashButton] : [
     tool('↻', '새로고침 (폴더에 추가·삭제된 사진 반영)', false, reloadFolder),
     Object.assign(tool('✨', '현재 폴더 AI 색인 + 이름 정리', false, startAiIndex), { id: 'ai-index' }),
@@ -898,7 +934,7 @@ function renderPath() {
     Object.assign(tool('☷', '작업 대기열', false, () => { renderTaskQueue(); $('task-manager').showModal(); }), { id: 'task-button' }),
     trashButton,
   ];
-  bar.append(build('div', { id: 'right' }, [chip, build('div', { id: 'tools' }, tools)]));
+  bar.append(build('div', { id: 'right' }, [chip, sortBox, build('div', { id: 'tools' }, tools)]));
   updateIndexButton();
   updateTaskBadge();
 }

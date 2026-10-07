@@ -8,6 +8,7 @@ import functools
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
 import configparser
+import datetime
 import http.server
 import io
 import json
@@ -76,16 +77,29 @@ def safe_path(rel: str) -> Path:
     raise PermissionError(rel)
 
 
-def image_size(path: Path) -> tuple[int, int]:
+def image_info(path: Path) -> tuple[int, int, float | None]:
+    """(width, height, EXIF capture time as a timestamp or None), cached per file version."""
     key = (str(path), path.stat().st_mtime_ns)
     if key not in _size_cache:
+        taken = None
         with Image.open(path) as img:
             w, h = img.size
-            # EXIF orientation 5-8 swaps width/height. Skip PNG: getexif() decodes the whole image there
-            if img.format != "PNG" and img.getexif().get(0x0112, 1) in (5, 6, 7, 8):
-                w, h = h, w
-        _size_cache[key] = (w, h)
+            # Skip PNG: getexif() decodes the whole image there (and AI PNGs carry no capture time anyway)
+            if img.format != "PNG":
+                exif = img.getexif()
+                if exif.get(0x0112, 1) in (5, 6, 7, 8):  # EXIF orientation 5-8 swaps width/height
+                    w, h = h, w
+                stamp = exif.get_ifd(0x8769).get(0x9003) or exif.get(0x0132)  # DateTimeOriginal, else DateTime
+                try:
+                    taken = datetime.datetime.strptime(str(stamp).strip("\x00 "), "%Y:%m:%d %H:%M:%S").timestamp()
+                except (TypeError, ValueError):
+                    pass
+        _size_cache[key] = (w, h, taken)
     return _size_cache[key]
+
+
+def image_size(path: Path) -> tuple[int, int]:
+    return image_info(path)[:2]
 
 
 def image_metadata(rel: str) -> dict:
@@ -124,12 +138,14 @@ def list_dir(rel: str) -> dict:
             dirs.append(entry.name)
         elif entry.suffix.lower() in IMAGE_EXTS:
             try:
-                w, h = image_size(entry)
-                mtime = entry.stat().st_mtime
+                w, h, taken = image_info(entry)
+                stat = entry.stat()
                 key = library.quick_hash(entry)
             except OSError:
                 continue
-            item = {"name": entry.name, "w": w, "h": h, "mtime": mtime, "fav": key in favorites}
+            # taken: EXIF capture time, or the file time when there is none (sorting needs a value)
+            item = {"name": entry.name, "w": w, "h": h, "mtime": stat.st_mtime, "bytes": stat.st_size,
+                    "taken": taken or stat.st_mtime, "fav": key in favorites}
             item.update(marks.get(key, {}))  # rating, note (only when set)
             files.append(item)
     files.sort(key=lambda f: f["mtime"], reverse=True)  # newest first

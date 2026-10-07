@@ -51,9 +51,18 @@ def main() -> None:
             mount.unlink()
 
         listing = server.list_dir("")
-        assert listing == {"dir": "", "dirs": ["sub"], "files": [  # newest first
-            {"name": "a.jpg", "w": 40, "h": 80, "mtime": 2000, "fav": False},
-            {"name": "b.png", "w": 90, "h": 30, "mtime": 1000, "fav": False}], "trashed": 0}, listing
+        sizes = {n: (server.ROOT / n).stat().st_size for n in ("a.jpg", "b.png")}
+        assert listing == {"dir": "", "dirs": ["sub"], "files": [  # newest first; no EXIF: taken = file time
+            {"name": "a.jpg", "w": 40, "h": 80, "mtime": 2000, "bytes": sizes["a.jpg"], "taken": 2000, "fav": False},
+            {"name": "b.png", "w": 90, "h": 30, "mtime": 1000, "bytes": sizes["b.png"], "taken": 1000, "fav": False}],
+            "trashed": 0}, listing
+        # EXIF capture time wins over the file time
+        exif = Image.Exif()
+        exif[0x0132] = "2021:05:06 07:08:09"
+        Image.new("RGB", (20, 20)).save(server.ROOT / "shot.jpg", exif=exif)
+        taken = next(f for f in server.list_dir("")["files"] if f["name"] == "shot.jpg")["taken"]
+        assert time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(taken)) == "2021-05-06 07:08:09", taken
+        (server.ROOT / "shot.jpg").unlink()
         server.library.set_favorites(server.ROOT, [server.ROOT / "a.jpg"], True)
         server.library.set_marks(server.ROOT, [server.ROOT / "a.jpg"], rating=3, note="keep")
         marked = {f["name"]: f for f in server.list_dir("")["files"]}
