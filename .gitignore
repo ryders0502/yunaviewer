@@ -1,0 +1,17 @@
+# secrets: copy yunaviewer.cfg.example to yunaviewer.cfg and put your Gemini key there
+yunaviewer.cfg
+
+# local environment and runtime files
+.venv/
+__pycache__/
+.yunaviewer/
+.yunaviewer.pid
+yunaviewer.log
+*.tmp
+
+# MediaPipe models (~33 MB): downloaded automatically on first use (body_edit._ensure_models)
+models/
+
+# tool state
+.claude/
+.playwright-mcp/

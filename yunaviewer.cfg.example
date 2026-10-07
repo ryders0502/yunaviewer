@@ -1,0 +1,22 @@
+[server]
+# 이미지 루트 폴더 (실행 인자로 덮어쓸 수 있음)
+root = ~/Pictures
+host = 127.0.0.1
+port = 8890
+
+[llm]
+# 이미지 입력이 필요하므로 gemini만 지원. GEMINI_API_KEY 환경변수가 있으면 우선
+provider = gemini
+gemini_api_key = 
+gemini_model = gemini-3.1-flash-lite
+# 무료 tier 모델만 사용. 의상 설명 생성(1회)과 검색/검증에 쓸 모델
+# gemini-3.8-flash는 무료 일일 한도가 너무 작아(수십 회) 600장 분석이 불가
+describe_model = gemini-3.5-flash-lite
+search_model = gemini-3.5-flash-lite
+# 동시 호출 수. 무료 tier 분당 한도(RPM)에 걸리면 줄일 것
+parallel_calls = 2
+
+[agent]
+# strands-agents가 설치된 python (상대경로는 프로젝트 폴더 기준)
+python = .venv/bin/python
+timeout = 600

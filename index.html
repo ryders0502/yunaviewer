@@ -1,0 +1,2569 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Yuna Viewer</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png">
+<meta name="theme-color" content="#1b1b1b">
+<style>
+  :root { --bg: #111; --panel: #1b1b1b; --line: #2c2c2c; --text: #e8e8e8; --dim: #8a8a8a; --accent: #4d9cff;
+    --scroll-track: #151515; --scroll-thumb: #454545; --scroll-hover: #5b5b5b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, "Noto Sans KR", sans-serif; }
+  body { display: grid; grid-template-rows: auto 1fr; overflow: hidden; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  [hidden] { display: none !important; }  /* author display rules (grid/flex) must not beat the hidden attribute */
+
+  #pathbar { display: flex; align-items: center; gap: 2px; padding: 10px 14px; border-bottom: 1px solid var(--line);
+    background: var(--panel); overflow-x: auto; white-space: nowrap; }
+  #pathbar button { background: none; border: 0; padding: 4px 8px; border-radius: 6px; }
+  #pathbar button:hover { background: #2a2a2a; }
+  #pathbar .sep { color: var(--dim); }
+  #filter-chip { margin-left: auto; display: none; align-items: center; gap: 8px; padding: 4px 6px 4px 12px;
+    border: 1px solid var(--accent); border-radius: 999px; color: #cfe3ff; }
+  #filter-chip button { background: #24456e; border: 0; border-radius: 999px; padding: 2px 10px; }
+
+  #main { display: grid; grid-template-columns: var(--left, 260px) 5px 1fr; min-height: 0; }
+  #list { overflow-y: auto; background: var(--panel); padding: 6px 0 120px; }
+  #list .row { display: flex; align-items: center; gap: 8px; padding: 5px 12px; cursor: pointer;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #list .row:hover { background: #262626; }
+  #list .row.sel { background: #1d3350; }
+  #list .row span { overflow: hidden; text-overflow: ellipsis; }
+  #list .dir { color: #ffd479; }
+  #list input { accent-color: var(--accent); margin: 0; flex: none; }
+  #list .mini { width: 28px; height: 28px; object-fit: cover; border-radius: 4px; flex: none; background: #2a2a2a; }
+  #list-modes { position: sticky; top: -6px; z-index: 1; display: flex; gap: 4px; margin: -6px 0 4px; padding: 8px 12px 6px;
+    background: var(--panel); border-bottom: 1px solid var(--line); }
+  #list-modes button { flex: 1; font-size: 12px; padding: 4px 0; border: 1px solid #333; border-radius: 6px; background: #222; color: var(--dim); }
+  #list-modes button.on { color: #fff; border-color: var(--accent); background: #24456e; }
+  #list .row:has(.tags) { padding-top: 4px; padding-bottom: 4px; }
+  #list .row:has(.tags) .mini { width: 36px; height: 36px; }
+  #list .tags { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  #list .tags .outfit { color: var(--text); font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
+  #list .tags .chips { display: flex; gap: 3px; overflow: hidden; }
+  #list .tags b { flex: none; font-weight: 400; font-size: 10.5px; line-height: 15px; padding: 0 5px; border-radius: 4px;
+    background: #2a2a2a; color: #aaa; }
+  #list .tags b.edit { background: #4a3a1c; color: #ffd98a; }
+  #list.thumbs .files { display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 4px; padding: 4px 8px; }
+  #list.thumbs .tile { position: relative; aspect-ratio: 1; border-radius: 6px; overflow: hidden; cursor: pointer; background: #2a2a2a; }
+  #list.thumbs .tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #list.thumbs .tile:hover img { opacity: .8; }
+  #list.thumbs .tile.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
+  #list.thumbs .tile input { position: absolute; left: 4px; top: 4px; opacity: 0; }
+  #list.thumbs .tile:hover input, #list.thumbs .tile.sel input { opacity: 1; }
+  #list.thumbs .tile .fav { position: absolute; right: 4px; top: 2px; font-size: 12px; text-shadow: 0 1px 2px #000; }
+  #splitter { cursor: col-resize; background: var(--line); }
+  #splitter:hover, #splitter.drag { background: var(--accent); }
+
+  #grid-wrap { position: relative; overflow-y: auto; min-height: 0; }
+  #grid { position: relative; margin: 2px 2px 140px; }
+  .cell { position: absolute; overflow: hidden; background: #222; cursor: zoom-in; }
+  .cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .cell .check { position: absolute; top: 8px; left: 8px; width: 26px; height: 26px; border-radius: 50%;
+    border: 2px solid #fff; background: rgba(0,0,0,.35); opacity: 0; transition: opacity .15s; padding: 0;
+    color: #fff; font-size: 14px; line-height: 22px; }
+  .cell:hover .check, .cell.sel .check { opacity: 1; }
+  .cell.sel { outline: 3px solid var(--accent); outline-offset: -3px; }
+  .cell.sel .check { background: var(--accent); border-color: var(--accent); }
+  #empty { color: var(--dim); padding: 40px; text-align: center; }
+
+  #prompt { position: fixed; left: calc(var(--left, 260px) + 5px + (100vw - var(--left, 260px) - 5px) / 2);
+    transform: translateX(-50%); bottom: 18px; width: min(760px, calc(100vw - var(--left, 260px) - 40px));
+    background: rgba(32,32,32,.94); backdrop-filter: blur(10px); border: 1px solid #3a3a3a; border-radius: 22px;
+    padding: 10px 12px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  #chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  #chips:not(:empty) { margin-bottom: 8px; }
+  .chip { position: relative; width: 36px; height: 36px; border-radius: 6px; overflow: hidden; }
+  .chip img { width: 100%; height: 100%; object-fit: cover; }
+  .chip button { position: absolute; top: 0; right: 0; width: 16px; height: 16px; padding: 0; border: 0;
+    background: rgba(0,0,0,.7); font-size: 11px; line-height: 16px; border-radius: 0 0 0 6px; }
+  #prompt form { display: flex; gap: 8px; align-items: center; }
+  #prompt input { flex: 1; background: none; border: 0; outline: 0; color: var(--text); font: inherit; padding: 8px 4px; }
+  #prompt form button { border: 0; border-radius: 999px; padding: 8px 16px; background: #e8e8e8; color: #111; }
+  #prompt form button:disabled { opacity: .5; cursor: wait; }
+  #status { color: var(--dim); font-size: 12px; padding: 4px 4px 0; }
+  #status:empty { display: none; }
+  #answer { position: relative; margin: 4px 4px 2px; padding: 8px 30px 8px 10px; border: 1px solid #333; border-radius: 10px;
+    background: #181818; font-size: 13px; line-height: 1.5; max-height: 40vh; overflow-y: auto; }
+  #answer .q { color: var(--dim); font-size: 12px; margin-bottom: 4px; }
+  #answer .a { white-space: pre-wrap; }
+  #answer .x { position: absolute; top: 4px; right: 4px; border: 0; background: none; color: var(--dim); }
+  #status.error { color: #ff9b9b; }
+  #status.busy::before { content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 6px;
+    vertical-align: -1px; border: 2px solid #555; border-top-color: var(--accent); border-radius: 50%;
+    animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #tagging { color: var(--dim); font-size: 12px; padding: 4px 4px 0; }
+  #tagging:empty { display: none; }
+
+  dialog { border: 0; padding: 0; max-width: none; max-height: none; width: 100vw; height: 100vh;
+    background: rgba(0,0,0,.92); color: var(--text); }
+  dialog::backdrop { background: transparent; }
+  #viewer { width: 100%; height: 100%; overflow: auto; display: grid; }
+  #viewer img { margin: auto; display: block; user-select: none; -webkit-user-drag: none; }
+  #viewer.zoomed { cursor: grab; }
+  #viewer:focus { outline: none; }
+  #viewer-info { position: fixed; top: 12px; left: 16px; color: #ccc; text-shadow: 0 1px 3px #000; }
+  #viewer-info { max-width: min(70vw, 680px); cursor: pointer; }
+  #viewer-info::after { content: ' ⓘ'; color: var(--accent); }
+  #viewer-info:hover { color: #fff; text-decoration: underline; }
+  #viewer-close { position: fixed; top: 10px; right: 14px; background: rgba(0,0,0,.5); border: 0;
+    width: 36px; height: 36px; border-radius: 50%; font-size: 18px; }
+  /* ‹ 이전 / 다음 › at the top center: the same pills in the viewer and the editor */
+  .nav-pills { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 4; }
+  .nav-pills button { background: rgba(35,35,35,.94); color: var(--text); border: 1px solid #444; border-radius: 999px; padding: 6px 12px; }
+  .nav-pills button:hover:not(:disabled) { background: #292929e8; border-color: #888; }
+  .nav-pills button:disabled { opacity: .35; cursor: default; }
+
+  #prompt form .ghost { background: #2c2c2c; color: var(--text); border: 1px solid #444; }
+  #viewer-actions { position: fixed; top: 10px; right: 60px; display: flex; flex-wrap: wrap;
+    justify-content: flex-end; gap: 6px; max-width: calc(100vw - 90px); }
+  #viewer-actions button { height: 36px; padding: 0 13px; border-radius: 18px; border: 1px solid #555;
+    background: rgba(0,0,0,.58); color: #eee; backdrop-filter: blur(8px); }
+  #viewer-actions button:hover { background: #292929e8; border-color: #777; }
+  #viewer-actions button.on { color: #ffd54d; border-color: #8b7626; }
+
+#editor { --editor-panel: min(450px, 45vw); --editor-prompt-clearance: 160px; background: #0d0d0d; }
+  #editor[open] { display: grid; grid-template-columns: 1fr var(--editor-panel); grid-template-rows: 100%; }
+  #ed-stage { position: relative; display: flex; overflow: auto; min-width: 0; min-height: 0; }
+  #ed-stage img { display: block;
+    user-select: none; -webkit-user-drag: none; }
+#ed-wrap { position: relative; margin: auto; line-height: 0; }
+#editor:not(.cropping) #ed-wrap::after { content: ''; position: absolute; top: 100%; left: 0; width: 1px; height: var(--editor-prompt-clearance); pointer-events: none; }
+  #editor.cropping #ed-wrap { overflow: clip; overflow-clip-margin: 8px; }
+  #ed-box { position: absolute; border: 1px solid #fff; box-shadow: 0 0 0 2000px rgba(0,0,0,.65); cursor: move; }
+  #ed-box::after { content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(#fff4, #fff4) 33.3% 0 / 1px 100% no-repeat,
+                linear-gradient(#fff4, #fff4) 66.6% 0 / 1px 100% no-repeat,
+                linear-gradient(#fff4, #fff4) 0 33.3% / 100% 1px no-repeat,
+                linear-gradient(#fff4, #fff4) 0 66.6% / 100% 1px no-repeat; }
+  #ed-box i { position: absolute; width: 14px; height: 14px; background: #fff; border-radius: 3px; }
+  #ed-box i[data-h="nw"] { left: -7px; top: -7px; cursor: nwse-resize; }
+  #ed-box i[data-h="ne"] { right: -7px; top: -7px; cursor: nesw-resize; }
+  #ed-box i[data-h="sw"] { left: -7px; bottom: -7px; cursor: nesw-resize; }
+  #ed-box i[data-h="se"] { right: -7px; bottom: -7px; cursor: nwse-resize; }
+  #ed-stretch { position: absolute; inset: 0; pointer-events: none; }
+  #ed-stretch b { position: absolute; pointer-events: auto; }
+  #ed-stretch b[data-s="e"] { right: -6px; top: 0; bottom: 12px; width: 12px; cursor: ew-resize; }
+  #ed-stretch b[data-s="s"] { bottom: -6px; left: 0; right: 12px; height: 12px; cursor: ns-resize; }
+  #ed-stretch b[data-s="se"] { right: -7px; bottom: -7px; width: 14px; height: 14px; cursor: nwse-resize;
+    background: #fff; border-radius: 3px; }
+  #ed-stretch b[data-s="e"]::after, #ed-stretch b[data-s="s"]::after { content: ''; position: absolute; inset: 4px;
+    background: #fff8; border-radius: 2px; }
+  #ed-stretch b:hover::after { background: var(--accent); }
+  #ed-stretch b[data-s="se"]:hover { background: var(--accent); }
+  #ed-busy { position: fixed; top: 14px; left: 14px; color: var(--dim); font-size: 12px; }
+  #prompt-tools button { background: rgba(35,35,35,.94); color: var(--text); border: 1px solid #444; border-radius: 999px; padding: 6px 12px; }
+  #editor #ed-nav { left: calc((100vw - var(--editor-panel)) / 2); }
+  #ed-panel { background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column;
+    min-height: 0; }
+  #ed-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; display: flex; flex-direction: column;
+    gap: 14px; }
+  #ed-panel h3 { margin: 0; font-size: 13px; color: var(--dim); font-weight: 600; }
+  #ed-panel .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  #ed-panel button { background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 8px; padding: 5px 10px; }
+  #ed-panel button.on { background: #24456e; border-color: var(--accent); }
+  #ed-panel button:disabled { opacity: .35; cursor: default; }
+  #ed-modes { gap: 0; }
+  #ed-modes button { flex: 1; border-radius: 0; }
+  #ed-modes button:first-child { border-radius: 8px 0 0 8px; }
+  #ed-modes button:last-child { border-radius: 0 8px 8px 0; }
+  #ed-panel input[type=number] { width: 80px; background: #111; color: var(--text); border: 1px solid #3a3a3a;
+    border-radius: 6px; padding: 4px 6px; font: inherit; }
+  #ed-panel label.slider { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-size: 13px; }
+  #ed-panel label.slider input { grid-column: 1 / -1; accent-color: var(--accent); }
+  #ed-panel label.slider output { color: var(--dim); }
+  #ed-actions { display: flex; gap: 8px; padding: 12px 16px 16px; border-top: 1px solid var(--line); }
+  #ed-actions button { flex: 1; padding: 8px; }
+  #ed-save { background: #e8e8e8 !important; color: #111; border: 0 !important; }
+  #ed-history button { flex: 1; }
+  #ed-body .chip-b, #ed-shape .chip-b { display: inline-flex; align-items: center; gap: 4px; background: #24456e; border: 1px solid var(--accent);
+    border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 12px; }
+  #ed-body .chip-b button, #ed-shape .chip-b button { border: 0; background: none; padding: 0 4px; font-size: 12px; }
+  /* before/after: the "before" image sits on top, clipped to the left of the divider */
+  #ed-before { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #ed-paint { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #editor.erasing #ed-paint { pointer-events: auto; cursor: crosshair; }
+  #ed-erase-mode.on { background: #24456e; border-color: var(--accent); }
+  #ed-divider { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff;
+    box-shadow: 0 0 6px #000a; cursor: ew-resize; touch-action: none; }
+  #ed-divider span { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 30px; height: 30px;
+    border-radius: 50%; background: #fff; color: #111; display: grid; place-items: center; font-size: 14px;
+    box-shadow: 0 2px 8px #0008; line-height: 1; }
+  #ed-divider::before { content: ''; position: absolute; inset: 0 -10px; }  /* wider grab area */
+  #editor #prompt { left: calc((100vw - var(--editor-panel)) / 2);
+    width: min(640px, calc(100vw - var(--editor-panel) - 40px)); z-index: 5; }
+  #editor #chips, #editor #edit-open { display: none; }
+  #prompt-tools { position: absolute; right: 10px; top: -34px; display: flex; gap: 6px; }
+  #prompt-tools button { font-size: 12px; padding: 4px 9px; }
+  /* nearly invisible until the mouse is over them (or keyboard focus is inside) */
+  #prompt-tools { opacity: .1; transition: opacity .15s; }
+  #prompt-tools:hover, #prompt-tools:focus-within { opacity: 1; }
+  #prompt.prompt-hidden { opacity: .12; }
+  #prompt.prompt-hidden:hover, #prompt.prompt-hidden:focus-within { opacity: .96; }
+  #prompt.prompt-hidden.hold { opacity: .12; }  /* just hidden: stay hidden until the mouse leaves */
+
+  #right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  #tools { display: flex; gap: 2px; }
+  #tools .tool { font-size: 15px; padding: 4px 9px; color: var(--dim); }
+  #tools .tool.on { color: #fff; background: #24456e; }
+  #task-button { position: relative; }
+  #task-button.busy { color: #fff; }
+  #task-button.busy::after { content: attr(data-count); position: absolute; top: -3px; right: -3px; min-width: 15px; height: 15px;
+    padding: 0 4px; box-sizing: border-box; border-radius: 999px; background: var(--accent); color: #fff; font-size: 10px;
+    font-weight: 700; line-height: 15px; text-align: center; animation: task-pulse 1.4s ease-in-out infinite; }
+  @keyframes task-pulse { 50% { opacity: .55; } }
+  #tools .tool.full { position: relative; color: #ffb4a8; }  /* trash has files: count badge, no pulse */
+  #tools .tool.full::after { content: attr(data-count); position: absolute; top: -3px; right: -3px; min-width: 15px; height: 15px;
+    padding: 0 4px; box-sizing: border-box; border-radius: 999px; background: #d9534f; color: #fff; font-size: 10px;
+    font-weight: 700; line-height: 15px; text-align: center; }
+  #tools .tool:disabled { opacity: .55; cursor: default; }
+  .cell .star { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; border: 0; border-radius: 50%;
+    padding: 0; background: rgba(0,0,0,.35); color: #fff; font-size: 16px; line-height: 28px; opacity: 0;
+    transition: opacity .15s; }
+  .cell:hover .star, .cell .star.on { opacity: 1; }
+  .cell .star.on { color: #ffd54d; }
+  .cell .best { position: absolute; right: 8px; bottom: 8px; background: #d4a017; color: #111; font-weight: 700;
+    border-radius: 999px; padding: 1px 8px; font-size: 12px; pointer-events: none; }
+  .cell .stack { position: absolute; left: 8px; bottom: 8px; background: rgba(0,0,0,.6); border-radius: 999px;
+    padding: 1px 8px; font-size: 12px; pointer-events: none; }
+  #list .fav { color: #ffd54d; flex: none; }
+  #sel-actions button.danger { color: #ff9a9a; border-color: #6b3434; }
+  #sel-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; font-size: 13px; }
+  #sel-actions[hidden] { display: none; }
+  #sel-actions button { background: #2c2c2c; border: 1px solid #444; border-radius: 999px; padding: 3px 12px; }
+  #sel-actions #sel-clear { margin-right: 4px; }
+  #status button { margin-left: 10px; background: #2c2c2c; border: 1px solid #444; border-radius: 999px;
+    padding: 1px 10px; font-size: 12px; }
+  #editor #sel-actions { display: none; }
+
+  #viewer-flags { position: fixed; top: 38px; left: 16px; color: #ffd54d; text-shadow: 0 1px 3px #000; }
+  #viewer-bar { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex;
+    flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
+  #viewer-bar > * { pointer-events: auto; }
+  #viewer-versions { display: flex; gap: 6px; }
+  #viewer-versions button { background: rgba(0,0,0,.55); border: 1px solid #555; border-radius: 999px; padding: 3px 12px; }
+  #viewer-versions button.on { background: #24456e; border-color: var(--accent); }
+  /* idle viewer: controls fade out so only the photo is left; any mouse move or key brings them back */
+  #dialog #viewer-info, #dialog #viewer-flags, #dialog #viewer-nav, #dialog #viewer-actions, #dialog #viewer-close,
+  #dialog #viewer-bar { transition: opacity .4s; }
+  #dialog.idle #viewer-info, #dialog.idle #viewer-flags, #dialog.idle #viewer-nav, #dialog.idle #viewer-actions,
+  #dialog.idle #viewer-close, #dialog.idle #viewer-bar { opacity: 0; }
+  #dialog.idle #viewer { cursor: none; }
+  #viewer-marks, #viewer-play { display: flex; gap: 6px; align-items: center; }
+  #viewer-stars button, #sel-stars button { background: none; border: 0; padding: 0 1px; font-size: 20px; color: #666; line-height: 1; }
+  #sel-stars button { font-size: 15px; }
+  #viewer-stars button.on, #sel-stars button.on { color: #ffd54d; }
+  #viewer-stars button:hover, #sel-stars button:hover { color: #ffe58a; }
+  #viewer-stars .clear, #sel-stars .clear { font-size: 12px; color: #888; margin-left: 2px; }
+  #viewer-note { width: 240px; background: rgba(0,0,0,.6); color: var(--text); border: 1px solid #555; border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 13px; }
+  #viewer-play button, #viewer-play select { background: rgba(0,0,0,.55); color: var(--text); border: 1px solid #555; border-radius: 999px; padding: 3px 12px; font: inherit; font-size: 13px; }
+  #viewer-play button.on { background: #24456e; border-color: var(--accent); }
+  #compare { background: #0b0b0b; }
+  #compare[open] { display: flex; }
+  #compare-grid { flex: 1; display: grid; gap: 4px; padding: 4px; }
+  #compare-grid .pane { position: relative; overflow: hidden; background: #000; border-radius: 4px; cursor: grab; }
+  #compare-grid .pane img { position: absolute; left: 0; top: 0; transform-origin: 0 0; user-select: none; -webkit-user-drag: none; }
+  #compare-grid .label { position: absolute; left: 8px; top: 6px; z-index: 1; font-size: 12px; color: #ddd; background: rgba(0,0,0,.6); padding: 1px 8px; border-radius: 999px; max-width: calc(100% - 16px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #compare-info { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); color: #aaa; font-size: 12px; text-shadow: 0 1px 3px #000; pointer-events: none; }
+  #compare-close { position: fixed; top: 10px; right: 14px; z-index: 2; background: rgba(0,0,0,.6); border: 0; width: 36px; height: 36px; border-radius: 50%; font-size: 18px; }
+  .cell .rating { position: absolute; left: 8px; top: 8px; color: #ffd54d; font-size: 12px; text-shadow: 0 1px 2px #000; pointer-events: none; }
+  .cell .note { position: absolute; left: 8px; top: 24px; font-size: 12px; pointer-events: none; }
+  #viewer-hint { color: #aaa; font-size: 12px; text-shadow: 0 1px 3px #000; pointer-events: none; }
+
+  #groups, #mover, #renamer { width: min(920px, 92vw); height: min(82vh, 760px); margin: auto; border: 1px solid #333;
+    border-radius: 14px; background: #1b1b1b; }
+  #mover { width: min(460px, 92vw); }
+  #groups::backdrop, #mover::backdrop, #renamer::backdrop { background: rgba(0,0,0,.6); }
+  #smart-album, #task-manager, #metadata-dialog { width: min(760px, 92vw); height: min(78vh, 680px); margin: auto; border: 1px solid #333; border-radius: 14px; background: #1b1b1b; color: var(--text); }
+  #smart-album::backdrop, #task-manager::backdrop, #metadata-dialog::backdrop { background: rgba(0,0,0,.6); }
+  #smart-album[open], #task-manager[open], #metadata-dialog[open] { display: flex; flex-direction: column; }
+  .task-row, .meta-row { padding: 9px 4px; border-bottom: 1px solid #303030; }
+  .meta-row { display: grid; grid-template-columns: 140px 1fr; gap: 12px; }
+  .meta-row span:first-child { color: var(--dim); }
+  .meta-row .value { white-space: pre-wrap; word-break: break-word; }
+  .meta-row .copy { margin-left: 8px; font-size: 12px; padding: 1px 8px; border: 1px solid #444; border-radius: 6px; background: #2a2a2a; color: var(--text); }
+  .meta-row .copy:hover { border-color: var(--accent); }
+  #smart-album h3 { margin: 4px 0 10px; font-size: 13px; font-weight: 600; color: var(--dim); }
+  #smart-list { display: grid; gap: 6px; margin-bottom: 22px; }
+  .smart-row { display: flex; align-items: center; gap: 8px; }
+  .smart-row .open { flex: 1; min-width: 0; text-align: left; background: #232323; border: 1px solid #333; border-radius: 8px;
+    padding: 9px 12px; color: var(--text); }
+  .smart-row .open:hover { border-color: var(--accent); background: #24456e; }
+  .smart-row .open b { font-weight: 600; }
+  .smart-row .open span { display: block; margin-top: 2px; color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .smart-row .del { background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 8px; padding: 9px 12px; color: #ff9a9a; }
+  .smart-row .del:hover { border-color: #ff6b6b; }
+  #smart-form { display: grid; grid-template-columns: 120px 1fr; gap: 10px 14px; align-items: center; max-width: 560px; }
+  #smart-form > span { color: var(--dim); font-size: 13px; text-align: right; }
+  #smart-form input:not([type=checkbox]), #smart-form select { background: #111; color: var(--text); border: 1px solid #444;
+    border-radius: 6px; padding: 7px 9px; font: inherit; min-width: 0; }
+  #smart-form input:focus, #smart-form select:focus { outline: none; border-color: var(--accent); }
+  #smart-form .check { display: flex; align-items: center; gap: 8px; color: var(--text); cursor: pointer; }
+  #smart-form .hint { grid-column: 2; margin-top: -4px; color: var(--dim); font-size: 12px; }
+  #smart-form .primary { grid-column: 2; justify-self: start; background: #e8e8e8; color: #111; border: 0; border-radius: 8px; padding: 7px 18px; }
+  #groups[open], #mover[open], #renamer[open] { display: flex; flex-direction: column; }
+  .panel-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .panel-head h2 { margin: 0; font-size: 16px; flex: 1; }
+  .panel-head button, .panel-foot button { background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 8px; padding: 5px 12px; }
+  .panel-head button.on { background: #24456e; border-color: var(--accent); }
+  .panel-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px; }
+  .panel-foot { display: flex; gap: 8px; justify-content: flex-end; align-items: center; padding: 12px 16px;
+    border-top: 1px solid var(--line); }
+  .panel-foot .primary { background: #e8e8e8; color: #111; border: 0; }
+  .panel-foot span { margin-right: auto; color: var(--dim); font-size: 12px; }
+  .panel-foot input { background: #111; color: var(--text); border: 1px solid #3a3a3a; border-radius: 6px; padding: 5px 8px;
+    font: inherit; flex: 1; min-width: 0; }
+  .panel-note { color: var(--dim); font-size: 13px; padding: 20px 0; text-align: center; }
+  #group-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+  .gcard { background: #232323; border: 1px solid #333; border-radius: 10px; padding: 8px; cursor: pointer; text-align: left; }
+  .gcard:hover { border-color: var(--accent); }
+  .gcard .thumbs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 2px; aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: #111; }
+  .gcard .thumbs img { width: 100%; height: 100%; min-height: 0; object-fit: cover; }
+  .gcard .thumbs img:only-child { grid-column: 1 / -1; grid-row: 1 / -1; }
+  .gcard .name { margin-top: 6px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gcard .count { color: var(--dim); font-size: 12px; }
+  #dir-list button { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 6px 10px;
+    border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #dir-list button:hover { background: #262626; }
+  #dir-list button.sel { background: #24456e; }
+  #rename-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  #rename-table td { padding: 4px 6px; border-bottom: 1px solid #262626; word-break: break-all; }
+  #rename-table td:first-child { color: var(--dim); }
+
+  /* Visible dark scrollbars for every independently scrollable pane. */
+  #list, #grid-wrap, #pathbar, #viewer, #ed-stage, #ed-scroll, .panel-body {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scroll-thumb) var(--scroll-track);
+  }
+  #list::-webkit-scrollbar, #grid-wrap::-webkit-scrollbar, #pathbar::-webkit-scrollbar,
+  #viewer::-webkit-scrollbar, #ed-stage::-webkit-scrollbar, #ed-scroll::-webkit-scrollbar,
+  .panel-body::-webkit-scrollbar { width: 10px; height: 10px; }
+  #list::-webkit-scrollbar-track, #grid-wrap::-webkit-scrollbar-track, #pathbar::-webkit-scrollbar-track,
+  #viewer::-webkit-scrollbar-track, #ed-stage::-webkit-scrollbar-track, #ed-scroll::-webkit-scrollbar-track,
+  .panel-body::-webkit-scrollbar-track { background: var(--scroll-track); }
+  #list::-webkit-scrollbar-thumb, #grid-wrap::-webkit-scrollbar-thumb, #pathbar::-webkit-scrollbar-thumb,
+  #viewer::-webkit-scrollbar-thumb, #ed-stage::-webkit-scrollbar-thumb, #ed-scroll::-webkit-scrollbar-thumb,
+  .panel-body::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border: 2px solid var(--scroll-track);
+    border-radius: 999px; }
+  #list::-webkit-scrollbar-thumb:hover, #grid-wrap::-webkit-scrollbar-thumb:hover, #pathbar::-webkit-scrollbar-thumb:hover,
+  #viewer::-webkit-scrollbar-thumb:hover, #ed-stage::-webkit-scrollbar-thumb:hover, #ed-scroll::-webkit-scrollbar-thumb:hover,
+  .panel-body::-webkit-scrollbar-thumb:hover { background: var(--scroll-hover); }
+  #list::-webkit-scrollbar-corner, #grid-wrap::-webkit-scrollbar-corner, #pathbar::-webkit-scrollbar-corner,
+  #viewer::-webkit-scrollbar-corner, #ed-stage::-webkit-scrollbar-corner, #ed-scroll::-webkit-scrollbar-corner,
+  .panel-body::-webkit-scrollbar-corner { background: var(--scroll-track); }
+  #list::-webkit-scrollbar-button, #grid-wrap::-webkit-scrollbar-button, #pathbar::-webkit-scrollbar-button,
+  #viewer::-webkit-scrollbar-button, #ed-stage::-webkit-scrollbar-button, #ed-scroll::-webkit-scrollbar-button,
+  .panel-body::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+
+  #trash-title { color: #ffb4a8; font-weight: 600; margin: 0 4px 0 2px; white-space: nowrap; }
+  #pathbar #trash-empty { color: #ff9a9a; border: 1px solid #6b3434; border-radius: 6px; padding: 3px 10px; white-space: nowrap; }
+  #pathbar #trash-empty:hover:not(:disabled) { background: #4a2020; border-color: #ff6b6b; }
+  #pathbar #trash-empty:disabled { opacity: .4; cursor: default; }
+  #list-toggle { font-size: 16px; margin-right: 6px; color: var(--dim); }
+  #app-title { font-weight: 800; font-size: 18px; letter-spacing: .3px; margin-right: 14px; padding-right: 14px;
+    border-right: 1px solid #333; white-space: nowrap; color: transparent; background-clip: text;
+    -webkit-background-clip: text; background-image: linear-gradient(90deg, #6aa8ff, #c08bff, #ff8fb1, #6aa8ff);
+    background-size: 300% 100%; animation: shimmer 6s linear infinite; }
+  @keyframes shimmer { to { background-position: 300% 0; } }
+  @media (prefers-reduced-motion: reduce) { #app-title { animation: none; } }
+  body.list-hidden #main { grid-template-columns: 1fr; }
+  body.list-hidden #list, body.list-hidden #splitter { display: none; }
+  body.list-hidden #prompt { left: 50%; width: min(760px, calc(100vw - 40px)); }
+
+  @media (max-width: 700px) {
+    #main { grid-template-columns: 1fr; }
+    #list, #splitter { display: none; }
+    #prompt { left: 50%; width: calc(100vw - 20px); }
+  }
+</style>
+</head>
+<body>
+<div id="pathbar"></div>
+<div id="main">
+  <div id="list"></div>
+  <div id="splitter"></div>
+  <div id="grid-wrap"><div id="grid"></div><div id="empty" hidden>이미지가 없습니다.</div></div>
+</div>
+
+  <div id="prompt">
+  <div id="prompt-tools"><button id="prompt-hide" type="button" title="프롬프트 자동 숨김 전환">숨김</button><label title="프롬프트 투명도"><input id="prompt-opacity" type="range" min="35" max="100" value="94" aria-label="프롬프트 투명도"></label></div>
+  <div id="sel-actions" hidden>
+    <button type="button" id="sel-clear" title="모든 선택 해제">✕ 선택 해제</button>
+    <button type="button" data-act="fav">★ 즐겨찾기</button>
+    <button type="button" data-act="trash">🗑 휴지통</button>
+    <button type="button" data-act="move">📁 이동</button>
+    <button type="button" data-act="rename">✎ 이름 정리</button>
+    <button type="button" data-act="compare" title="2~4장 나란히 비교">⧉ 비교</button>
+    <span id="sel-stars" title="선택한 사진 별점 (✕ 지우기)"></span>
+    <button type="button" data-act="restore">↩ 복원</button>
+    <button type="button" data-act="delete" class="danger">✕ 영구 삭제</button>
+  </div>
+  <div id="chips"></div>
+  <form id="prompt-form">
+    <input id="prompt-input" autocomplete="off" placeholder="예: 같은 의상인 이미지 전부 찾아줘 / 앉아 있는 자세의 이미지 전부 찾아줘">
+    <button type="button" id="edit-open" class="ghost" disabled title="이미지 1장을 선택하면 편집할 수 있습니다">편집</button>
+    <button id="prompt-send">검색</button>
+  </form>
+  <div id="answer" hidden></div>
+  <div id="status"></div>
+  <div id="tagging"></div>
+</div>
+
+<dialog id="dialog">
+  <div id="viewer" tabindex="-1"><img id="viewer-img" alt=""></div>
+  <div id="viewer-info" title="이미지 정보 보기 (EXIF, AI 분석 태그) · 사진 더블클릭으로도 열림"></div>
+  <div id="viewer-nav" class="nav-pills"><button id="viewer-prev" title="이전 이미지 (←)">‹ 이전</button><button id="viewer-next" title="다음 이미지 (→)">다음 ›</button></div>
+  <div id="viewer-actions">
+    <button id="viewer-fav">☆ 즐겨찾기</button>
+    <button id="viewer-trash">🗑 휴지통</button>
+    <button id="viewer-move">📁 이동</button>
+    <button id="viewer-rename">✎ 이름 정리</button>
+    <button id="viewer-edit">🛠 편집</button>
+  </div>
+  <button id="viewer-close" aria-label="닫기">✕</button>
+  <div id="viewer-flags"></div>
+  <div id="viewer-bar"><div id="viewer-versions"></div>
+    <div id="viewer-marks"><span id="viewer-stars"></span>
+      <input id="viewer-note" maxlength="200" placeholder="메모 (Enter 저장)" autocomplete="off"></div>
+    <div id="viewer-play"><button id="slide-toggle" title="슬라이드쇼 (P)">▶ 슬라이드쇼</button>
+      <select id="slide-interval" title="넘김 간격"><option value="2">2초</option><option value="3">3초</option><option value="5">5초</option><option value="10">10초</option></select>
+      <button id="viewer-compare" title="원본과 편집본 나란히 비교">⧉ 비교</button></div>
+    <div id="viewer-hint">← → 이동 · Space 선택 · F ★ · 1~5 별점 (0 지우기) · P 슬라이드쇼 · E 편집 · Del 휴지통 · ↑↓ 편집본</div></div>
+</dialog>
+<dialog id="compare">
+  <div id="compare-grid"></div>
+  <div id="compare-info">휠: 같이 확대 · 드래그: 같이 이동 · 더블클릭: 맞춤 · Esc 닫기</div>
+  <button id="compare-close" title="닫기 (Esc)">✕</button>
+</dialog>
+
+<dialog id="smart-album">
+  <div class="panel-head"><h2>스마트 앨범</h2><button data-close="smart-album">닫기</button></div>
+  <div class="panel-body"><h3>저장된 앨범</h3><div id="smart-list"></div><h3>새 앨범</h3><form id="smart-form">
+    <span>앨범 이름</span><input id="smart-name" required maxlength="60" placeholder="예: 세로 즐겨찾기">
+    <span>방향</span><select id="smart-orientation"><option value="any">모든 방향</option><option value="portrait">세로</option><option value="landscape">가로</option><option value="square">정사각형</option></select>
+    <span>즐겨찾기</span><label class="check"><input id="smart-favorites" type="checkbox"> 즐겨찾기만</label>
+    <span>최소 별점</span><select id="smart-rating"><option value="0">상관없음</option><option value="1">★1 이상</option><option value="2">★2 이상</option><option value="3">★3 이상</option><option value="4">★4 이상</option><option value="5">★5</option></select>
+    <span>메모 포함</span><input id="smart-note" placeholder="메모 글자 (선택)">
+    <span>파일명 포함</span><input id="smart-query" placeholder="파일명 일부 (선택)">
+    <span>AI 분석 내용</span><input id="smart-tag-query" placeholder="예: 전신, 흰색 원피스, dress (선택)">
+    <div class="hint">AI 색인된 사진의 설명에서 찾습니다. 한글도 됩니다 (전신, 흰색 블라우스, 앉아 있는). 색인되지 않은 사진은 제외됩니다.</div>
+    <button class="primary">저장</button>
+  </form></div>
+</dialog>
+<dialog id="task-manager">
+  <div class="panel-head"><h2>작업 대기열</h2><button id="task-clear">완료 항목 지우기</button><button data-close="task-manager">닫기</button></div>
+  <div class="panel-body" id="task-list"></div>
+</dialog>
+<dialog id="metadata-dialog">
+  <div class="panel-head"><h2>이미지 정보</h2><button data-close="metadata-dialog">닫기</button></div>
+  <div class="panel-body" id="metadata-body"></div>
+</dialog>
+
+<dialog id="groups">
+  <div class="panel-head"><h2 id="groups-title"></h2><span id="groups-kinds"></span>
+    <button id="groups-close">닫기</button></div>
+  <div class="panel-body"><div id="group-list"></div><div id="group-note" class="panel-note" hidden></div></div>
+</dialog>
+
+<dialog id="mover">
+  <div class="panel-head"><h2>폴더로 이동</h2></div>
+  <div class="panel-body"><div id="dir-list"></div></div>
+  <div class="panel-foot"><input id="new-folder" placeholder="새 폴더 이름 (선택한 폴더 안에 만들기)">
+    <button id="mover-cancel">취소</button><button id="mover-ok" class="primary">이동</button></div>
+</dialog>
+
+<dialog id="renamer">
+  <div class="panel-head"><h2>이름 정리 (myshare 형식)</h2></div>
+  <div class="panel-body"><table id="rename-table"></table><div id="rename-note" class="panel-note"></div></div>
+  <div class="panel-foot"><span id="rename-info"></span>
+    <button id="rename-cancel">취소</button><button id="rename-ok" class="primary" disabled>이름 바꾸기</button></div>
+</dialog>
+
+<dialog id="editor">
+  <div id="ed-stage">
+    <div id="ed-wrap"><img id="ed-img" alt=""><img id="ed-before" alt="" hidden><canvas id="ed-paint"></canvas><div id="ed-divider" hidden><span>⇆</span></div><div id="ed-box" hidden><i data-h="nw"></i><i data-h="ne"></i><i data-h="sw"></i><i data-h="se"></i></div><div id="ed-stretch"><b data-s="e" title="가로 늘리기"></b><b data-s="s" title="세로 늘리기"></b><b data-s="se" title="가로·세로 늘리기"></b></div></div>
+    <div id="ed-busy"></div>
+  </div>
+  <div id="ed-nav" class="nav-pills" hidden><button id="ed-prev">‹ 이전</button><button id="ed-next">다음 ›</button><button id="ed-apply-selected">선택 이미지에 설정 적용</button></div>
+  <div id="ed-panel">
+    <div id="ed-scroll">
+    <div id="ed-name" style="font-weight:600; word-break:break-all"></div>
+    <h3>모드</h3>
+    <div class="row" id="ed-modes"><button id="ed-stretch-mode" class="on">늘리기 모드</button><button id="ed-crop">자르기 모드</button></div>
+    <h3>자르기</h3>
+    <div class="row" id="ed-ratios"></div>
+    <h3>크기 (stretch)</h3>
+    <div class="row">
+      <input type="number" id="ed-w" min="1" max="12000"> × <input type="number" id="ed-h" min="1" max="12000">
+    </div>
+    <label class="row" style="font-size:13px"><input type="checkbox" id="ed-lock" checked> 비율 고정 (해제하면 늘리기)</label>
+    <h3>회전 / 반전</h3>
+    <div class="row" id="ed-orient"><button data-o="ccw" title="왼쪽으로 90°">⟲ 왼쪽</button><button data-o="cw" title="오른쪽으로 90°">⟳ 오른쪽</button><button data-o="flipH">⇋ 좌우</button><button data-o="flipV">⇅ 상하</button></div>
+    <div class="row" style="justify-content:space-between"><h3>보정</h3><button id="ed-auto" title="AI가 사진을 보고 보정 값을 추천합니다">✨ 자동 보정</button></div>
+    <div id="ed-sliders" style="display:flex; flex-direction:column; gap:10px"></div>
+    <h3>배경</h3>
+    <div class="row" id="ed-bg"><button data-m="none" class="on">원본</button><button data-m="blur">흐림</button><button data-m="remove" title="투명 PNG로 저장됩니다">제거</button></div>
+    <label class="slider" id="ed-bgamt-wrap" hidden>흐림 세기<output></output><input type="range" id="ed-bgamt" min="0.1" max="1" step="0.05" value="0.5"></label>
+    <h3>얼굴만</h3>
+    <div id="ed-face-sliders" style="display:flex; flex-direction:column; gap:10px"></div>
+    <h3>부분 지우기</h3>
+    <div class="row"><button id="ed-erase-mode" title="잡티나 자국을 붓으로 칠하면 주변으로 메웁니다">🩹 지우기 모드</button>
+      <span id="ed-erase-count" style="font-size:12px; color:var(--dim)"></span><button id="ed-erase-clear" hidden>모두 취소</button></div>
+    <label class="slider" id="ed-brush-wrap" hidden>붓 크기<output></output><input type="range" id="ed-brush" min="4" max="60" step="1" value="14"></label>
+    <div id="ed-body-wrap" hidden><h3>체형 (프롬프트로 조정)</h3><div class="row" id="ed-body"></div></div>
+    <div id="ed-shape-wrap" hidden><h3>얼굴 형태 (프롬프트로 조정)</h3><div class="row" id="ed-shape"></div></div>
+    <div class="row" id="ed-history"><button id="ed-undo" disabled title="실행 취소 (Ctrl+Z)">↶ 실행 취소</button><button id="ed-redo" disabled title="다시 실행 (Ctrl+Shift+Z)">↷ 다시 실행</button></div>
+    </div>
+    <div id="ed-actions">
+      <button id="ed-reset">초기화</button><button id="ed-cancel">취소</button><button id="ed-save">저장</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+const $ = id => document.getElementById(id);
+function build(tag, props, children) {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children);
+  return node;
+}
+const enc = encodeURIComponent;
+const join = (dir, name) => dir ? `${dir}/${name}` : name;
+const thumbUrl = (rel, mtime = '') => `/thumb?path=${enc(rel)}${mtime === '' ? '' : `&v=${enc(mtime)}`}`;
+// the version (mtime) in the URL: /img is cached for an hour, and a new edit saved under a deleted edit's name
+// (x_edit.png again) must not show the old picture
+const imgUrl = (rel, mtime = '') => `/img?path=${enc(rel)}${mtime === '' ? '' : `&v=${enc(mtime)}`}`;
+
+const state = { dir: '', dirs: [], files: [], items: [], filter: null, filterLabel: '', filterTag: '', selected: new Set(),
+  onlyFav: false, group: localStorage.getItem('groupEdits') !== '0', indexComplete: false, indexRunning: false, smartActive: null, tags: {} };
+
+async function load(dir) {
+  const res = await fetch(`/api/list?dir=${enc(dir)}`);
+  if (!res.ok) {
+    if (dir && !state.files.length && !state.dirs.length) return load('');  // e.g. the remembered folder is gone
+    return setStatus(`폴더를 열 수 없습니다 (${res.status})`, 'error');
+  }
+  const wasTrash = inTrash();
+  Object.assign(state, await res.json(), { filter: null, best: null, indexComplete: false, indexRunning: false });
+  if (wasTrash !== inTrash()) state.selected.clear();  // trash picks make no sense outside it (and vice versa)
+  setStatus('');
+  masonry.target = BATCH;
+  history.replaceState(null, '', `#${enc(state.dir)}`);
+  if (!inTrash()) localStorage.setItem('lastDir', state.dir);  // reopened next time; the trash is not a place to start
+  render();
+  $('grid-wrap').scrollTop = 0;
+  pollTagging(state.dir);
+  const tagDir = state.dir;
+  fetch(`/api/tags/list?dir=${enc(tagDir)}`).then(r => r.ok ? r.json() : {tags:{}}).then(data => {
+    if (tagDir !== state.dir) return;
+    state.tags = data.tags || {};
+    if (state.smartActive?.tagQuery) render();
+  }).catch(() => { state.tags = {}; });
+}
+
+// Show progress only after an explicit AI indexing/search action; opening a folder never uploads photos.
+let taggingTimer = null;
+async function pollTagging(dir) {
+  clearTimeout(taggingTimer);
+  if (dir !== state.dir || !state.files.length || inTrash()) {
+    $('tagging').textContent = '';
+    return updateIndexButton();
+  }
+  const s = await (await fetch(`/api/tags/status?dir=${enc(dir)}`)).json();
+  if (dir !== state.dir) return;
+  state.indexRunning = !!s.running;
+  state.indexComplete = s.total > 0 && s.done === s.total && !s.error;
+  updateIndexButton();
+  const box = $('tagging');
+  if (s.error) box.textContent = `이미지 분석 오류: ${s.error} (${s.done}/${s.total})`;
+  else if (s.running) box.textContent = `이미지 분석 중… ${s.done}/${s.total}`;
+  else box.textContent = '';
+  if (s.running) taggingTimer = setTimeout(() => pollTagging(dir), 2000);
+}
+
+function updateIndexButton() {
+  const button = $('ai-index');
+  if (!button) return;
+  button.hidden = !state.files.length || inTrash();  // nothing to index here
+  // indexed but some files still unnamed: the button stays usable and only does the renaming part
+  const unnamed = state.files.filter(f => !f.name.match(NAME_RE)?.[1]).length;
+  button.disabled = state.indexRunning || (state.indexComplete && !unnamed);
+  button.textContent = state.indexComplete && !unnamed ? '✓' : '✨';
+  button.title = state.indexRunning ? '현재 폴더 AI 색인 진행 중'
+    : state.indexComplete ? (unnamed ? `AI 색인 완료 · 이름 정리 (${unnamed}장)` : '현재 폴더 AI 색인·이름 정리 완료')
+    : '현재 폴더 AI 색인 + 이름 정리 (이미지를 Gemini로 전송)';
+}
+
+async function startAiIndex() {
+  if (!state.files.length || inTrash()) return;
+  if (state.indexComplete) return offerRename();  // already indexed: just the renaming
+  if (!confirm('현재 폴더의 이미지를 Gemini로 전송해 AI 검색 색인을 만들까요?\n끝나면 이름이 정리 안 된 파일의 새 이름 미리보기가 열립니다.')) return;
+  const dir = state.dir;
+  state.indexRunning = true;  // also while it waits in the queue, so it cannot be started twice
+  updateIndexButton();
+  enqueueTask(`AI 색인 · ${dir || 'root'}`, async progress => {
+    try {
+      await api('/api/tags/start', { dir });
+      if (dir === state.dir) { $('tagging').textContent = '이미지 분석을 시작합니다…'; pollTagging(dir); }
+      while (true) {
+        const s = await (await fetch(`/api/tags/status?dir=${enc(dir)}`)).json();
+        progress(`${s.done}/${s.total}`);
+        if (!s.running) { if (s.error) throw new Error(s.error); break; }
+        await new Promise(resolve => setTimeout(resolve, 1800));
+      }
+      if (dir === state.dir) offerRename();
+    } finally {
+      if (dir === state.dir) await pollTagging(dir);  // ✓ or ✨ again, from the real status
+    }
+  });
+}
+
+// indexing and renaming are one step: once the descriptions exist, the rename preview for files still without a
+// myshare-style name (same rule as library.needs_name) opens by itself; nothing is renamed until it is confirmed
+function offerRename() {
+  const count = state.files.filter(f => !f.name.match(NAME_RE)?.[1]).length;
+  if (!count || inTrash()) return setStatus('AI 색인 완료');
+  setStatus(`AI 색인 완료 · 이름 정리가 안 된 파일 ${count}장의 새 이름을 만드는 중…`, 'busy');
+  openRename([]).finally(() => setStatus(''));
+}
+
+const taskQueue = [];
+let queueRunning = false;
+// number of waiting + running tasks on the ☷ button, so a running job is visible without opening the queue
+function updateTaskBadge() {
+  const button = $('task-button');
+  if (!button) return;
+  const active = taskQueue.filter(task => ['대기 중', '진행 중'].includes(task.state)).length;
+  button.classList.toggle('busy', active > 0);
+  button.dataset.count = active || '';
+  button.title = active ? `작업 대기열 · ${active}개 진행/대기 중` : '작업 대기열';
+}
+function renderTaskQueue() {
+  updateTaskBadge();
+  $('task-list').replaceChildren(...(taskQueue.length ? taskQueue.map(task => build('div', { className: 'task-row' }, [
+    build('strong', { textContent: task.label }, []),
+    build('div', { textContent: `${task.state}${task.detail ? ` · ${task.detail}` : ''}` }, []),
+    ...(task.state === '대기 중' ? [build('button', { textContent: '취소', onclick: () => { task.state = '취소됨'; renderTaskQueue(); } }, [])] : []),
+    ...(task.state === '실패' ? [build('button', { textContent: '재시도', onclick: () => enqueueTask(`${task.label} 재시도`, task.run) }, [])] : []),
+  ])) : [build('div', { className: 'panel-note', textContent: '대기 중인 작업이 없습니다.' }, [])]));
+}
+function enqueueTask(label, run) {
+  const task = { label, state: '대기 중', detail: '', run };
+  taskQueue.push(task); renderTaskQueue();  // the ☷ badge shows it; the queue opens only when asked
+  if (!queueRunning) {
+    queueRunning = true;
+    (async () => {
+      for (const item of taskQueue) {
+        if (item.state !== '대기 중') continue;
+        item.state = '진행 중'; renderTaskQueue();
+        try { await item.run(detail => { item.detail = detail; renderTaskQueue(); }); item.state = '완료'; }
+        catch (error) { item.state = '실패'; item.detail = error.message; setStatus(`${item.label} 실패: ${error.message} (☷에서 재시도)`, 'error'); }
+        renderTaskQueue();
+      }
+      queueRunning = false;
+    })();
+  }
+  return task;
+}
+$('task-clear').onclick = () => {
+  for (let i = taskQueue.length - 1; i >= 0; i--) if (!['대기 중', '진행 중'].includes(taskQueue[i].state)) taskQueue.splice(i, 1);
+  renderTaskQueue();
+};
+document.querySelectorAll('[data-close]').forEach(button => button.onclick = () => $(button.dataset.close).close());
+
+function savedSmartAlbums() { try { return JSON.parse(localStorage.getItem('smartAlbums') || '[]'); } catch { return []; } }
+function applySmartAlbum(album) {
+  state.smartActive = album;
+  state.filter = new Set(smartMatches(album)); state.filterLabel = album.name; state.filterTag = '스마트 앨범'; state.onlyFav = false; state.selected.clear();
+  masonry.target = BATCH; render(); $('grid-wrap').scrollTop = 0; $('smart-album').close();
+}
+// Korean words for the AI description search: the file-name dictionary (OUTFIT_WORDS, English -> Korean) turned around,
+// plus spoken variants and the words only descriptions use (shot size, pose, hair)
+const SEARCH_ALIASES = {
+  전신: ['fullbody'], 전신사진: ['fullbody'], 상체: ['upperbody'], 상반신: ['upperbody'], 얼굴: ['headshot'], 얼굴사진: ['headshot'],
+  하얀: ['white'], 흰: ['white'], 화이트: ['white'], 검은: ['black'], 블랙: ['black'], 빨간: ['red'], 레드: ['red'],
+  파란: ['blue'], 블루: ['blue'], 분홍: ['pink'], 노란: ['yellow'], 초록: ['green'], 녹색: ['green'], 연두: ['green'],
+  핑크색: ['pink'], 갈색: ['brown'], 회색: ['gray', 'grey'], 베이지색: ['beige'], 보라색: ['purple'],
+  드레스: ['dress'], 팬츠: ['pants'], 스커트: ['skirt'], 비키니: ['bikini'], 수영복: ['swimsuit'],
+  앉아: ['sitting'], 앉은: ['sitting'], 앉는: ['sitting'], 서있: ['standing'], 서서: ['standing'],
+  걷는: ['walking'], 걸어: ['walking'], 누워: ['lying'], 누운: ['lying'], 무릎: ['kneeling'], 기대: ['leaning'],
+  단발: ['bob'], 웨이브: ['wavy', 'waves'], 곱슬: ['curly'], 앞머리: ['bangs'], 포니테일: ['ponytail'], 머리띠: ['headband'],
+};
+let koSearchWords = null;
+function koWords() {
+  if (koSearchWords) return koSearchWords;
+  koSearchWords = new Map(Object.entries(SEARCH_ALIASES));
+  for (const [en, ko] of Object.entries(OUTFIT_WORDS)) {
+    if (en === 'mini') continue;  // "mini" alone would also hit "mini dress"; 미니스커트 uses miniskirt
+    koSearchWords.set(ko, [...(koSearchWords.get(ko) || []), en]);
+  }
+  return koSearchWords;
+}
+// "전신 이미지" -> [['fullbody']]: longest dictionary word at each position, anything else (이미지, 사진, 을/를, 있는) skipped
+function koTerms(text) {
+  const words = koWords(), keys = [...words.keys()].sort((a, b) => b.length - a.length), terms = [];
+  for (const run of text.match(/[가-힣]+/g) || []) {
+    for (let i = 0; i < run.length;) {
+      const key = keys.find(k => run.startsWith(k, i));
+      if (key) { terms.push(words.get(key)); i += key.length; } else i++;
+    }
+  }
+  return terms;
+}
+// short English words must match as whole words ("red" is inside "colored", "bra" inside "brand")
+function tagHas(alts, spaced, squashed) {
+  return alts.some(alt => alt.length <= 4 ? new RegExp(`(^|[^a-z])${alt}([^a-z]|$)`).test(spaced) : squashed.includes(alt));
+}
+// does a stored description match the query? English: one phrase, spaces/hyphens ignored; Hangul: every word must match
+function tagMatches(tags, query) {
+  // only garments the photo really has: every description has an "onepiece" field, mostly "none", and matching
+  // field names regardless of their value made "onepiece" hit every indexed photo
+  const text = Object.entries(tags || {})
+    .filter(([, value]) => typeof value === 'string' && !['none', 'not visible'].includes(value))
+    .map(([field, value]) => `${field} ${value}`).join(' | ').toLocaleLowerCase();
+  const squash = t => t.toLocaleLowerCase().replace(/[\s-]+/g, '');  // "one piece", "one-piece", "onepiece" are one word
+  const squashed = squash(text), spaced = text.replace(/[^a-z]+/g, ' ');
+  const english = squash(query.replace(/[가-힣]+/g, ' '));
+  if (english && !squashed.includes(english)) return false;
+  if (!/[가-힣]/.test(query)) return true;
+  const terms = koTerms(query);
+  return terms.length > 0 && terms.every(alts => tagHas(alts, spaced, squashed));
+}
+function smartMatches(album) {
+  const query = (album.query || '').toLocaleLowerCase();
+  const tagQuery = (album.tagQuery || '').trim();
+  return state.files.filter(f => {
+    const ratio = f.w / f.h;
+    const direction = album.orientation === 'portrait' ? ratio < .92 : album.orientation === 'landscape' ? ratio > 1.08 : album.orientation === 'square' ? ratio >= .92 && ratio <= 1.08 : true;
+    const note = (album.note || '').toLocaleLowerCase();
+    return direction && (!album.favorites || f.fav) && (f.rating || 0) >= (album.rating || 0)
+      && (!note || (f.note || '').toLocaleLowerCase().includes(note))
+      && (!query || f.name.toLocaleLowerCase().includes(query)) && (!tagQuery || tagMatches(state.tags[f.name], tagQuery));
+  }).map(f => f.name);
+}
+function renderSmartAlbums() {
+  const saved = savedSmartAlbums();
+  $('smart-list').replaceChildren(...(saved.length ? saved.map((album, i) => build('div', {className:'smart-row'}, [
+    build('button', {className:'open', title:'이 조건으로 현재 폴더 보기', onclick:()=>applySmartAlbum(album)}, [
+      build('b', {textContent:album.name}, []),
+      build('span', {textContent:[({portrait:'세로',landscape:'가로',square:'정사각형'})[album.orientation] || '모든 방향',
+        album.favorites ? '즐겨찾기만' : '', album.rating ? `★${album.rating} 이상` : '', album.note ? `메모 "${album.note}"` : '',
+        album.query ? `파일명 "${album.query}"` : '',
+        album.tagQuery ? `AI "${album.tagQuery}"` : ''].filter(Boolean).join(' · ')}, [])]),
+    build('button', {className:'del', textContent:'삭제', onclick:()=>{saved.splice(i,1);localStorage.setItem('smartAlbums',JSON.stringify(saved));renderSmartAlbums();}}, []),
+  ])) : [build('div', {className:'panel-note', textContent:'저장된 스마트 앨범이 없습니다.'}, [])]));
+}
+function openSmartAlbums() { renderSmartAlbums(); if (!$('smart-album').open) $('smart-album').showModal(); }
+$('smart-form').onsubmit = event => {
+  event.preventDefault(); const saved = savedSmartAlbums();
+  saved.push({name:$('smart-name').value.trim(),orientation:$('smart-orientation').value,favorites:$('smart-favorites').checked,rating:Number($('smart-rating').value),note:$('smart-note').value.trim(),query:$('smart-query').value.trim(),tagQuery:$('smart-tag-query').value.trim()});
+  localStorage.setItem('smartAlbums',JSON.stringify(saved)); $('smart-form').reset(); renderSmartAlbums();
+};
+
+// a "복사" button that copies `text` and says so for a moment
+function copyButton(text, title) {
+  const button = build('button', { className: 'copy', textContent: '복사', title, onclick: async () => {
+    try { await navigator.clipboard.writeText(text); button.textContent = '복사됨 ✓'; }
+    catch { button.textContent = '복사 실패'; }
+    setTimeout(() => { button.textContent = '복사'; }, 1500);
+  } }, []);
+  return button;
+}
+// rows of the AI tool that made the photo (from the file itself: ComfyUI graph, WebUI parameters, AIGC label)
+function generationRows(gen) {
+  if (!gen || !gen.tool) return [['생성 정보', '파일에 기록된 생성 정보 없음']];
+  const rows = [['생성 도구', [gen.tool, ...(gen.generators || [])].join(' · ')]];
+  if (gen.models?.length) rows.push(['모델', gen.models.join(', ')]);
+  (gen.prompts || []).forEach((text, i) => rows.push([gen.prompts.length > 1 ? `프롬프트 ${i + 1}` : '프롬프트', text, true]));
+  (gen.negative || []).forEach(text => rows.push(['네거티브', text, true]));
+  if (gen.seed != null) rows.push(['시드', String(gen.seed), true]);
+  const settings = Object.entries(gen.settings || {}).map(([k, v]) => `${k} ${v}`).join(' · ');
+  if (settings) rows.push(['설정', settings]);
+  if (gen.input_images) rows.push(['입력 이미지', `${gen.input_images}장`]);
+  if (gen.producer) rows.push(['생성 업체 코드', gen.producer]);
+  return rows;
+}
+async function showMetadata(rel) {
+  $('metadata-dialog').showModal(); $('metadata-body').replaceChildren(build('div',{className:'panel-note',textContent:'정보를 불러오는 중…'},[]));
+  try {
+    const response = await fetch(`/api/metadata?path=${enc(rel)}`);
+    if (!response.ok) throw new Error(`이미지 정보를 가져오지 못했습니다 (${response.status})`);
+    const data = await response.json();
+    // [label, value, copyable]
+    const rows = [['파일명',data.name,true],['해상도',`${data.width} × ${data.height}`],['용량',`${(data.bytes/1048576).toFixed(2)} MB`],['촬영 날짜',data.taken || 'EXIF 정보 없음'],['카메라',data.camera || 'EXIF 정보 없음'],['수정 날짜',new Date(data.modified*1000).toLocaleString()]];
+    rows.push(...generationRows(data.generation));
+    // AI description one field per row; the raw JSON showed field names like "onepiece" even when the value is "none"
+    const fields = {visible:'AI · 촬영 범위', top:'AI · 상의', bottom:'AI · 하의', onepiece:'AI · 원피스', outer:'AI · 아우터', hair:'AI · 헤어', pose:'AI · 자세'};
+    const analysis = data.analysis || {};
+    if (!Object.keys(analysis).length) rows.push(['AI 분석 태그', '색인된 분석 정보 없음']);
+    for (const [key, value] of Object.entries(analysis)) {
+      if (key === 'id') continue;
+      rows.push([fields[key] || `AI · ${key}`, ({none:'없음', 'not visible':'보이지 않음'})[value] || value]);
+    }
+    $('metadata-body').replaceChildren(...rows.map(([label, value, copyable]) => build('div', { className: 'meta-row' }, [
+      build('span', { textContent: label }, []),
+      build('span', { className: 'value' }, [String(value), ...(copyable ? [copyButton(String(value), `${label} 복사`)] : [])])])));
+  } catch (error) { $('metadata-body').textContent = error.message; }
+}
+$('viewer-info').onclick = () => viewer.file && showMetadata(join(state.dir, viewer.file.name));
+
+function visibleFiles() {
+  return state.filter ? state.files.filter(f => state.filter.has(f.name)) : state.files;
+}
+
+// files the grid shows: AI/album filter and favorites applied, then edited copies (name_edit.png) stacked under
+// their original (item.versions) when grouping is on
+const EDIT_RE = /^(.+)_edit\d*\.[^.]+$/;
+function displayItems() {
+  let files = visibleFiles();
+  if (state.onlyFav) files = files.filter(f => f.fav);
+  if (!state.group) return files;
+  const stems = new Map(files.filter(f => !EDIT_RE.test(f.name)).map(f => [f.name.replace(/\.[^.]+$/, ''), f]));
+  const versions = new Map(), items = [];
+  for (const f of files) {
+    const base = EDIT_RE.test(f.name) ? stems.get(f.name.match(EDIT_RE)[1]) : null;
+    if (base) versions.set(base, [...(versions.get(base) || []), f]);
+    else items.push(f);
+  }
+  return items.map(f => versions.has(f) ? { ...f, versions: versions.get(f) } : f);
+}
+
+function render() {
+  if (state.smartActive) state.filter = new Set(smartMatches(state.smartActive));
+  state.items = displayItems();
+  renderPath();
+  renderList();
+  layoutGrid();
+  renderChips();
+}
+
+function toggleList() {
+  const hidden = document.body.classList.toggle('list-hidden');
+  localStorage.setItem('listHidden', hidden ? '1' : '');
+}
+if (localStorage.getItem('listHidden')) document.body.classList.add('list-hidden');
+
+function clearFilter() {
+  state.best = null;
+  state.smartActive = null;
+  state.filter = null;
+  state.filterTag = '';
+  state.selected.clear();
+  $('prompt-input').value = '';
+  setStatus('');
+  masonry.target = BATCH;
+  render();
+}
+
+function renderPath() {
+  const bar = $('pathbar');
+  bar.replaceChildren(
+    build('button', { id: 'list-toggle', textContent: '☰', title: '파일 리스트 열기/닫기', onclick: toggleList }, []),
+    build('span', { id: 'app-title', textContent: 'Yuna Viewer' }, []),
+    ...(inTrash() ? [] : [build('button', { textContent: '🏠 root', onclick: () => load('') }, [])]));
+  // the trash is a place of its own, not a folder to walk through: its name and an empty button instead of the path
+  if (inTrash()) bar.append(build('span', { id: 'trash-title', textContent: `🗑 휴지통 (${state.files.length}장)` }, []),
+    build('button', { id: 'trash-empty', textContent: '휴지통 비우기', disabled: !state.files.length, onclick: emptyTrash }, []));
+  const parts = state.dir && !inTrash() ? state.dir.split('/') : [];
+  parts.forEach((part, i) => {
+    bar.append(build('span', { className: 'sep', textContent: '/' }, []),
+      build('button', { textContent: part, onclick: () => load(parts.slice(0, i + 1).join('/')) }, []));
+  });
+  const chip = build('div', { id: 'filter-chip' }, [`${state.filterTag || 'AI 필터'}: ${state.filterLabel} (${state.filter?.size ?? 0})`,
+    build('button', { textContent: '필터 해제', onclick: clearFilter }, [])]);
+  chip.style.display = state.filter ? 'flex' : 'none';
+  const withCount = (count, button) => { button.dataset.count = count || ''; return button; };
+  const tool = (icon, title, on, onclick) => build('button', { className: 'tool' + (on ? ' on' : ''), textContent: icon, title, onclick }, []);
+  const trashButton =
+    withCount(state.trashed, Object.assign(tool('🗑', inTrash() ? '원래 폴더로 돌아가기' : state.trashed ? `휴지통 보기 · ${state.trashed}장` : '휴지통 보기 (비어 있음)', inTrash(), () => {
+      if (!inTrash()) state.beforeTrash = state.dir;
+      load(inTrash() ? state.beforeTrash || '' : TRASH_DIR);
+    }), { className: `tool${inTrash() ? ' on' : ''}${state.trashed ? ' full' : ''}` }));
+  // in the trash only the 🗑 button (the way back) is offered; nothing else applies to deleted photos
+  const tools = inTrash() ? [trashButton] : [
+    tool('↻', '새로고침 (폴더에 추가·삭제된 사진 반영)', false, reloadFolder),
+    Object.assign(tool('✨', '현재 폴더 AI 색인 + 이름 정리', false, startAiIndex), { id: 'ai-index' }),
+    tool('▶', '슬라이드쇼 (현재 목록)', false, startSlideshow),
+    tool('★', '즐겨찾기만 보기', state.onlyFav, () => { state.onlyFav = !state.onlyFav; masonry.target = BATCH; render(); }),
+    tool('📑', '편집본(_edit)을 원본 뒤에 묶어 보기', state.group, toggleGroup),
+    tool('📚', '자동 앨범 (의상 / 헤어 / 자세)', false, () => openAlbums('outfit')),
+    tool('🔖', '저장된 조건으로 자동 갱신되는 스마트 앨범', false, openSmartAlbums),
+    tool('🔍', '중복·비슷한 사진 찾기', false, openDuplicates),
+    Object.assign(tool('☷', '작업 대기열', false, () => { renderTaskQueue(); $('task-manager').showModal(); }), { id: 'task-button' }),
+    trashButton,
+  ];
+  bar.append(build('div', { id: 'right' }, [chip, build('div', { id: 'tools' }, tools)]));
+  updateIndexButton();
+  updateTaskBadge();
+}
+
+const OUTFIT_WORDS = {
+  // colors
+  white: '흰색', black: '검정', gray: '회색', grey: '회색', beige: '베이지', ivory: '아이보리', cream: '크림', red: '빨강',
+  pink: '핑크', blue: '파랑', lightblue: '하늘색', navy: '네이비', green: '초록', mint: '민트', sage: '세이지', yellow: '노랑',
+  mustard: '머스터드', orange: '주황', brown: '갈색', burgundy: '버건디', maroon: '적갈색', lavender: '라벤더', gold: '골드',
+  purple: '보라', silver: '실버', khaki: '카키', denim: '데님',
+  // patterns, materials, details
+  floral: '꽃무늬', striped: '줄무늬', plaid: '체크', gingham: '깅엄', polkadot: '도트', patterned: '패턴', lace: '레이스',
+  satin: '새틴', leather: '가죽', knit: '니트', ribbed: '골지', tweed: '트위드', sheer: '시스루', ruffle: '러플', pleated: '플리츠',
+  offshoulder: '오프숄더', oneshoulder: '원숄더', strapless: '스트랩리스', backless: '백리스', halter: '홀터', vneck: '브이넥',
+  turtleneck: '터틀넥', keyhole: '키홀', cutout: '컷아웃', bodycon: '보디콘', skater: '스케이터', slip: '슬립', tie: '타이',
+  trim: '트림', longsleeve: '긴소매', buttonup: '단추', collared: '카라', retro: '레트로', gothic: '고딕', bootcut: '부츠컷',
+  bear: '곰', fox: '여우', maisonkitsune: '메종키츠네', baseball: '야구',
+  // garments
+  shirt: '셔츠', tshirt: '티셔츠', blouse: '블라우스', top: '상의', croptop: '크롭탑', tanktop: '나시', tank: '나시',
+  camisole: '캐미솔', sweater: '스웨터', cardigan: '가디건', vest: '조끼', jersey: '저지', bustier: '뷔스티에', corset: '코르셋',
+  bodysuit: '보디슈트', dress: '원피스', minidress: '미니원피스', maxidress: '맥시원피스', sundress: '선드레스',
+  nightdress: '잠옷원피스', sweaterdress: '니트원피스', gown: '드레스', romper: '롬퍼', skirt: '치마', mini: '미니스커트',
+  miniskirt: '미니스커트', jeans: '청바지', shorts: '반바지', joggers: '조거팬츠', pants: '바지', panties: '팬티', bra: '브라',
+  string: '스트링', lingerie: '란제리', swimsuit: '수영복', kimono: '기모노', set: '세트', loungeset: '라운지세트',
+  twopiece: '투피스', armor: '갑옷', maid: '메이드', warrior: '무사', headshot: '얼굴',
+  nude: '누드', bottom: '하의', bottoms: '하의', side: '사이드', ties: '끈', briefs: '브리프', underwear: '속옷',
+  colored: '컬러', logo: '로고', accents: '포인트', offtheshoulder: '오프숄더', ruffled: '러플', neckline: '넥라인',
+  bow: '리본', knitted: '니트', wet: '젖은', shortsleeve: '반소매', cowl: '카울', onepiece: '원피스', calvinklein: '캘빈클라인',
+  jacket: '재킷', coat: '코트', trenchcoat: '트렌치코트', blazer: '블레이저', hoodie: '후드티', sweatshirt: '맨투맨',
+  polo: '폴로', henley: '헨리넥', tube: '튜브', bikini: '비키니', leggings: '레깅스', slacks: '슬랙스', trousers: '바지',
+  culottes: '퀼로트', overalls: '멜빵', jumpsuit: '점프슈트', suit: '정장', uniform: '교복', school: '스쿨', sailor: '세일러',
+  hanbok: '한복', cheongsam: '치파오', qipao: '치파오', apron: '앞치마', pajama: '잠옷', pajamas: '잠옷', robe: '가운',
+  scarf: '스카프', hat: '모자', cap: '모자', beret: '베레모', boots: '부츠', heels: '힐', socks: '양말', stockings: '스타킹',
+  midi: '미디', maxi: '맥시', long: '롱', short: '숏', wide: '와이드', flared: '플레어', mesh: '망사', velvet: '벨벳',
+  silk: '실크', chiffon: '시폰', linen: '린넨', cotton: '면', wool: '울', fur: '퍼', sequin: '시퀸', check: '체크',
+  houndstooth: '하운드투스', camo: '카모', animal: '애니멀', leopard: '호피', zebra: '지브라', heart: '하트', star: '별',
+  sleeveless: '민소매', puff: '퍼프', wrap: '랩', crop: '크롭', high: '하이', low: '로우', waist: '웨이스트', sporty: '스포티',
+  sports: '스포츠', gym: '운동복', yoga: '요가', tennis: '테니스', golf: '골프', nurse: '간호사', police: '경찰',
+  bunny: '바니', cat: '고양이', chinese: '중국풍', japanese: '일본풍', korean: '한국풍', wedding: '웨딩', bridal: '브라이덜',
+  teal: '청록', turquoise: '터키석', coral: '코랄', peach: '피치', olive: '올리브', wine: '와인', charcoal: '차콜',
+  camel: '카멜', tan: '탄', rose: '로즈', lilac: '라일락', violet: '바이올렛', sky: '하늘', dark: '진한', light: '연한',
+};
+const VISIBLE = { headshot: '얼굴', upperbody: '상체', fullbody: '전신' };
+const NAME_RE = /^(?:(.+?)_)?([a-z0-9]+)_(headshot|upperbody|fullbody)_(\d+x\d+)_([1-4]k)_(\d+)(_edit\d*)?\.([^.]+)$/i;
+
+// split a run-together outfit token into dictionary words: fewest unknown letters first, then fewest words
+function splitOutfit(token) {
+  const best = [{ cost: 0, words: [] }];
+  for (let i = 1; i <= token.length; i++) {
+    let pick = null;
+    for (let j = Math.max(0, i - 16); j < i; j++) {
+      if (!best[j]) continue;
+      const piece = token.slice(j, i), known = piece in OUTFIT_WORDS;
+      const cost = best[j].cost + (known ? 1 : 100 * piece.length);
+      if (!pick || cost < pick.cost) pick = { cost, words: [...best[j].words, known ? OUTFIT_WORDS[piece] : piece] };
+    }
+    best[i] = pick;
+  }
+  // merge consecutive unknown letters back into one word
+  return best[token.length].words.reduce((out, w) => {
+    if (/^[a-z0-9]$/.test(w) && /^[a-z0-9]+$/.test(out.at(-1) || '')) out[out.length - 1] += w; else out.push(w);
+    return out;
+  }, []);
+}
+function fileLabel(name) {
+  const m = name.match(NAME_RE);
+  if (!m) return null;
+  const [, , outfit, visible, ratio, res, num, edit, ext] = m;
+  return [splitOutfit(outfit.toLowerCase()).join(' '), VISIBLE[visible.toLowerCase()], ratio, res.toLowerCase(),
+          `#${Number(num)}`, ...(edit ? ['편집'] : []), ext.toLowerCase()];
+}
+
+// left list: 'label' (Korean summary of the myshare-style file name), 'name' (raw file name) or 'thumbs' (mini grid)
+const LIST_MODES = [['label', '요약'], ['name', '파일명'], ['thumbs', '썸네일']];
+let listMode = localStorage.getItem('listMode') || 'label';
+function renderList() {
+  const list = $('list');
+  list.className = listMode === 'thumbs' ? 'thumbs' : '';
+  list.replaceChildren(build('div', { id: 'list-modes' }, LIST_MODES.map(([mode, label]) => build('button', {
+    textContent: label, className: mode === listMode ? 'on' : '',
+    onclick: () => { listMode = mode; localStorage.setItem('listMode', mode); renderList(); } }, []))));
+  if (state.dir && !inTrash()) {
+    const up = state.dir.split('/').slice(0, -1).join('/');
+    list.append(build('div', { className: 'row dir', onclick: () => load(up) }, ['📁 ..']));
+  }
+  if (!state.filter) {
+    for (const d of state.dirs) {
+      list.append(build('div', { className: 'row dir', title: d, onclick: () => load(join(state.dir, d)) }, [`📁 ${d}`]));
+    }
+  }
+  const files = build('div', { className: 'files' }, []);
+  for (const f of state.items) {
+    const rel = join(state.dir, f.name), sel = state.selected.has(rel);
+    const box = build('input', { type: 'checkbox', checked: sel,
+      onclick: e => { e.stopPropagation(); toggleSelect(rel); } }, []);
+    const thumb = build('img', { className: 'mini', src: thumbUrl(rel, f.mtime), loading: 'lazy', alt: '' }, []);
+    const fav = f.fav ? [build('span', { className: 'fav', textContent: '★' }, [])] : [];
+    if (listMode === 'thumbs') {
+      files.append(build('div', { className: 'tile' + (sel ? ' sel' : ''), title: f.name, onclick: () => openViewer(f) },
+        [thumb, box, ...fav]));
+      continue;
+    }
+    const versions = f.versions?.length ? `  ✎${f.versions.length}` : '';
+    const label = listMode === 'label' && fileLabel(f.name);
+    const text = label
+      ? build('span', { className: 'tags' }, [build('span', { className: 'outfit', textContent: label[0] }, []),
+          build('span', { className: 'chips' }, [...label.slice(1).map(t => build('b', { textContent: t, className: t === '편집' ? 'edit' : '' }, [])),
+            ...(versions ? [build('b', { className: 'edit', textContent: versions.trim() }, [])] : [])])])
+      : build('span', { textContent: f.name + versions }, []);
+    files.append(build('div', { className: 'row' + (sel ? ' sel' : ''), title: f.name, onclick: () => openViewer(f) },
+      [box, thumb, ...fav, text]));
+  }
+  list.append(files);
+}
+
+// masonry rendered in batches: more cells are appended as the grid scrolls near the bottom
+const BATCH = 60;
+const masonry = { cols: 1, colW: 0, gap: 3, heights: [], shown: 0, target: BATCH };
+
+function layoutGrid() {
+  const grid = $('grid');
+  $('empty').hidden = state.items.length > 0;
+  const width = grid.clientWidth;
+  masonry.cols = Math.max(1, Math.round(width / 300));
+  masonry.colW = (width - masonry.gap * (masonry.cols - 1)) / masonry.cols;
+  masonry.heights = new Array(masonry.cols).fill(0);
+  masonry.shown = 0;
+  grid.replaceChildren();
+  appendCells();
+}
+
+function appendCells() {
+  const grid = $('grid');
+  const { gap, colW, heights } = masonry;
+  const files = state.items.slice(masonry.shown, masonry.target);
+  for (const f of files) {
+    // shortest column, but near-equal columns count as tied and the leftmost wins: photos of almost the same
+    // size (1671 vs 1672 px) otherwise scatter a row in random order and newer ones land right of older ones
+    const lowest = Math.min(...heights);
+    const c = heights.findIndex(v => v <= lowest + colW * 0.1);
+    const h = colW * f.h / f.w;
+    const rel = join(state.dir, f.name);
+    const check = build('button', { className: 'check', textContent: '✓', title: '선택',
+      onclick: e => { e.stopPropagation(); toggleSelect(rel); } }, []);
+    const star = build('button', { className: 'star' + (f.fav ? ' on' : ''), textContent: f.fav ? '★' : '☆', title: '즐겨찾기',
+      onclick: e => {
+        e.stopPropagation();
+        toggleFav([rel], !f.fav, () => {
+          if (state.onlyFav) return render();
+          star.classList.toggle('on', f.fav);
+          star.textContent = f.fav ? '★' : '☆';
+          renderList();
+        });
+      } }, []);
+    const cell = build('div', { className: 'cell' + (state.selected.has(rel) ? ' sel' : ''), title: f.name,
+      onclick: () => openViewer(f) },
+      [build('img', { src: thumbUrl(rel, f.mtime), loading: 'lazy', alt: f.name }, []), check, star,
+       ...(f.versions?.length ? [build('span', { className: 'stack', textContent: `✎ ${f.versions.length}` }, [])] : []),
+       ...(state.best === f.name ? [build('span', { className: 'best', textContent: '⭐ 베스트' }, [])] : []),
+       ...(f.rating ? [build('span', { className: 'rating', textContent: '★'.repeat(f.rating) }, [])] : []),
+       ...(f.note ? [build('span', { className: 'note', textContent: '📝', title: f.note }, [])] : [])]);
+    Object.assign(cell.style, { left: `${c * (colW + gap)}px`, top: `${heights[c]}px`, width: `${colW}px`, height: `${h}px` });
+    grid.append(cell);
+    heights[c] += h + gap;
+  }
+  masonry.shown += files.length;
+  grid.style.height = `${Math.max(0, ...heights)}px`;
+  fillViewport();
+}
+
+function fillViewport() {
+  const wrap = $('grid-wrap');
+  if (masonry.shown < state.items.length && wrap.scrollTop + wrap.clientHeight * 2 > wrap.scrollHeight) {
+    masonry.target = masonry.shown + BATCH;
+    requestAnimationFrame(appendCells);
+  }
+}
+$('grid-wrap').addEventListener('scroll', fillViewport, { passive: true });
+
+function toggleSelect(rel) {
+  state.selected.has(rel) ? state.selected.delete(rel) : state.selected.add(rel);
+  render();
+}
+
+function renderChips() {
+  $('edit-open').disabled = state.selected.size !== 1 || inTrash();
+  updateSelActions();
+  $('chips').replaceChildren(...[...state.selected].map(rel =>
+    build('div', { className: 'chip', title: rel }, [
+      build('img', { src: thumbUrl(rel, state.files.find(f => f.name === rel.split('/').pop())?.mtime), alt: '' }, []),
+      build('button', { textContent: '✕', onclick: () => toggleSelect(rel) }, []),
+    ])));
+}
+
+function setStatus(text, kind = '') {  // kind: '' | 'error' | 'busy'
+  $('status').textContent = text;
+  $('status').className = kind;
+}
+
+const REFINE_WORDS = /그\s*중|이\s*중|거기서|여기서|결과에서|결과\s*중|그\s*안에서|이\s*안에서|아까|그\s*결과|더\s*좁혀|추가로/;
+
+// prompt history: ArrowUp/ArrowDown walk through previous prompts (kept across reloads)
+const SEARCH_PLACEHOLDER = $('prompt-input').placeholder;
+// The viewer (search) and the editor (edit commands) share one prompt box, but each keeps its own text and history.
+const PROMPT_KEYS = { search: 'promptHistory', edit: 'editPromptHistory' };
+const prompts = { mode: 'search', drafts: { search: '', edit: '' },
+  history: Object.fromEntries(Object.entries(PROMPT_KEYS).map(([mode, key]) => [mode, JSON.parse(localStorage.getItem(key) || '[]')])) };
+let history_ = prompts.history.search;
+let historyPos = history_.length;
+function setPromptMode(mode) {
+  if (mode === prompts.mode) return;
+  prompts.drafts[prompts.mode] = $('prompt-input').value;
+  prompts.mode = mode;
+  $('prompt-input').value = prompts.drafts[mode];
+  history_ = prompts.history[mode];
+  historyPos = history_.length;
+}
+$('prompt-input').addEventListener('keydown', e => {
+  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' || e.isComposing) return;
+  e.preventDefault();
+  historyPos = Math.max(0, Math.min(history_.length, historyPos + (e.key === 'ArrowUp' ? -1 : 1)));
+  $('prompt-input').value = history_[historyPos] ?? '';
+});
+
+$('prompt-form').onsubmit = async e => {
+  e.preventDefault();
+  const prompt = $('prompt-input').value.trim();
+  if (!prompt) return;
+  if (history_.at(-1) !== prompt) history_.push(prompt);
+  history_.splice(0, history_.length - 50);
+  localStorage.setItem(PROMPT_KEYS[prompts.mode], JSON.stringify(history_));
+  historyPos = history_.length;
+  const send = $('prompt-send');
+  send.disabled = true;
+  if ($('editor').open) return editCommand(prompt).finally(() => { send.disabled = false; });
+  setStatus('AI가 이미지를 분석하는 중…', 'busy');
+  try {
+    // "그중 …" while results are on screen: search only those, and tell the model what produced them
+    const refine = !!state.filter && REFINE_WORDS.test(prompt);
+    const data = await withIndexConsent(allow => api('/api/agent',
+      { dir: state.dir, prompt, selected: [...state.selected], allow_index: allow,
+        ...(refine ? { within: [...state.filter], previous: state.filterLabel } : {}) }));
+    if (data.answer != null) return showAnswer(prompt, data);  // a question about the selected photos, not a search
+    state.smartActive = null;
+    state.best = null;
+    state.filter = new Set(data.matches);
+    masonry.target = BATCH;
+    state.filterLabel = refine ? `${state.filterLabel} → ${prompt}` : prompt;
+    state.filterTag = 'AI 필터';
+    render();
+    $('grid-wrap').scrollTop = 0;
+    setStatus(`${data.message || ''} (${data.matches.length}장)`.trim());
+  } catch (error) {
+    setStatus(error.message, 'error');
+  } finally {
+    send.disabled = false;
+  }
+};
+
+// popup viewer: fit to screen, Ctrl+wheel to zoom, drag to pan
+const viewer = { scale: 1, fit: 1, file: null, index: 0, version: 0, files: [], loadToken: 0, pending: null };
+function openViewer(f) {
+  showViewer(Math.max(0, state.items.findIndex(i => i.name === f.name)));
+}
+// show item #index of the grid; version 0 is the original, 1.. its edited copies
+function showViewer(index, version = 0) {
+  const item = state.items[index];
+  if (!item) return;
+  const files = [item, ...(item.versions || [])];
+  Object.assign(viewer, { index, version: Math.min(version, files.length - 1), files });
+  const f = viewer.file = files[viewer.version];
+  viewer.fit = Math.min(1, innerWidth / f.w, innerHeight / f.h);
+  viewer.scale = 1;
+  loadViewerImage(f, index);
+  applyZoom();
+  renderViewerBar();
+  if (!$('dialog').open) { $('dialog').showModal(); wakeViewer(); }
+  $('viewer').focus({ preventScroll: true });  // not the edit button, or Space would press it
+}
+
+// Show a photo without ever showing the previous one. A browser keeps painting the old image (stretched to the new
+// size) until the new file has loaded, which takes seconds for 4k PNGs. So: hide the image, let the small cached
+// thumbnail of the new photo load first, then swap in the full-size original once it is decoded off-screen.
+function loadViewerImage(f, index) {
+  const img = $('viewer-img'), token = ++viewer.loadToken, rel = join(state.dir, f.name);
+  if (viewer.pending) viewer.pending.src = '';  // drop the download of a photo the user skipped past
+  const full = viewer.pending = new Image();
+  full.src = imgUrl(rel, f.mtime);
+  img.style.visibility = 'hidden';
+  img.onload = () => { if (token === viewer.loadToken) img.style.visibility = ''; };
+  img.onerror = () => {
+    if (token !== viewer.loadToken) return;
+    if (img.getAttribute('src') !== full.src) img.src = full.src;  // no thumbnail: wait for the original instead
+    else img.style.visibility = '';  // the original failed too: show the broken image rather than nothing
+  };
+  img.src = thumbUrl(rel, f.mtime);
+  const showFull = () => {
+    if (token !== viewer.loadToken) return;  // the user already moved on
+    viewer.pending = null;  // done: a later photo must not cancel this one, the neighbours reuse its cache
+    img.src = full.src;
+    // warm the neighbours for the next key press, but only now: two more huge downloads must not slow this one
+    for (const next of [state.items[index + 1], state.items[index - 1]]) {
+      if (next) new Image().src = imgUrl(join(state.dir, next.name), next.mtime);
+    }
+  };
+  full.decode().then(showFull, showFull);
+}
+function renderViewerBar() {
+  const f = viewer.file, rel = join(state.dir, f.name);
+  $('viewer-versions').replaceChildren(...(viewer.files.length > 1 ? viewer.files.map((v, i) => build('button', {
+    className: i === viewer.version ? 'on' : '', textContent: i === 0 ? '원본' : `편집 ${i}`,
+    onclick: () => showViewer(viewer.index, i) }, [])) : []));
+  $('viewer-flags').textContent = [state.selected.has(rel) ? '✓ 선택됨' : '', f.fav ? '★ 즐겨찾기' : ''].filter(Boolean).join('   ');
+  $('viewer-fav').textContent = f.fav ? '★ 즐겨찾기 해제' : '☆ 즐겨찾기';
+  $('viewer-fav').classList.toggle('on', !!f.fav);
+  for (const id of ['viewer-fav', 'viewer-trash', 'viewer-move', 'viewer-rename', 'viewer-edit', 'viewer-marks']) $(id).hidden = inTrash();
+  $('viewer-stars').replaceChildren(...starButtons(f.rating || 0, n => setMarks([rel], { rating: n })));
+  if (document.activeElement !== $('viewer-note')) $('viewer-note').value = f.note || '';
+  $('viewer-compare').hidden = viewer.files.length < 2;
+  $('viewer-compare').textContent = `⧉ 비교 (${Math.min(4, viewer.files.length)})`;
+  $('viewer-prev').disabled = viewer.index <= 0;
+  $('viewer-next').disabled = viewer.index >= state.items.length - 1;
+}
+
+// ★★★☆☆ buttons; clicking the current rating again clears it
+function starButtons(current, onPick) {
+  return [...[1, 2, 3, 4, 5].map(n => build('button', { textContent: '★', className: n <= current ? 'on' : '', title: `별점 ${n}`,
+    onclick: () => onPick(n === current ? 0 : n) }, [])),
+    build('button', { className: 'clear', textContent: '✕', title: '별점 지우기', onclick: () => onPick(0) }, [])];
+}
+// rating and/or note for some photos; the list, grid badges and viewer follow
+async function setMarks(rels, marks) {
+  try {
+    await api('/api/marks', { paths: rels, ...marks });
+    const names = new Set(rels.map(baseName));
+    for (const f of state.files) {
+      if (!names.has(f.name)) continue;
+      if (marks.rating !== undefined) f.rating = marks.rating || undefined;
+      if (marks.note !== undefined) f.note = marks.note.trim() || undefined;
+    }
+    for (const v of viewer.files) Object.assign(v, state.files.find(f => f.name === v.name) || {});
+    render();
+    if ($('dialog').open) renderViewerBar();
+    if (marks.rating !== undefined) setStatus(marks.rating ? `${rels.length}장에 ★${marks.rating}` : `${rels.length}장 별점 지움`);
+    else setStatus(marks.note.trim() ? '메모를 저장했습니다.' : '메모를 지웠습니다.');
+  } catch (error) { setStatus(error.message, 'error'); }
+}
+$('viewer-note').addEventListener('keydown', e => {
+  e.stopPropagation();  // typing must not trigger viewer shortcuts
+  if (e.key === 'Enter' && !e.isComposing) { setMarks([join(state.dir, viewer.file.name)], { note: $('viewer-note').value }); $('viewer').focus(); }
+  if (e.key === 'Escape') { $('viewer-note').value = viewer.file.note || ''; $('viewer').focus(); e.preventDefault(); }
+});
+
+// fade the viewer controls after a moment without input; not while the mouse rests on a control or the note is typed in
+const IDLE_MS = 2500;
+let idleTimer = null;
+function wakeViewer() {
+  $('dialog').classList.remove('idle');
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    const busy = document.activeElement === $('viewer-note') || document.activeElement === $('slide-interval')
+      || $('dialog').querySelector('#viewer-nav:hover, #viewer-actions:hover, #viewer-close:hover, #viewer-bar:hover, #viewer-info:hover');
+    if (busy) return wakeViewer();
+    if ($('dialog').open) $('dialog').classList.add('idle');
+  }, IDLE_MS);
+}
+for (const type of ['mousemove', 'pointerdown', 'wheel', 'keydown']) $('dialog').addEventListener(type, wakeViewer, { passive: true });
+$('dialog').addEventListener('close', () => { clearTimeout(idleTimer); $('dialog').classList.remove('idle'); });
+
+// slideshow over the current list (filter applied), looping; any manual step keeps it going from there
+const slide = { timer: null };
+function setSlideshow(on) {
+  clearInterval(slide.timer);
+  slide.timer = on ? setInterval(() => showViewer((viewer.index + 1) % state.items.length), Number($('slide-interval').value) * 1000) : null;
+  $('slide-toggle').textContent = on ? '⏸ 정지' : '▶ 슬라이드쇼';
+  $('slide-toggle').classList.toggle('on', on);
+}
+$('slide-interval').value = localStorage.getItem('slideInterval') || '3';
+$('slide-interval').onchange = () => { localStorage.setItem('slideInterval', $('slide-interval').value); if (slide.timer) setSlideshow(true); };
+$('slide-toggle').onclick = () => setSlideshow(!slide.timer);
+$('dialog').addEventListener('close', () => setSlideshow(false));
+function startSlideshow() {
+  if (!state.items.length) return;
+  if (!$('dialog').open) showViewer(0);
+  setSlideshow(true);
+}
+
+// side-by-side compare of 2-4 photos: one shared zoom/pan, so the same part of each photo is on screen
+const cmp = { files: [], scale: 1, cx: 0.5, cy: 0.5 };
+function openCompare(rels) {
+  const files = rels.slice(0, 4).map(rel => ({ rel, f: state.files.find(x => x.name === baseName(rel)) })).filter(x => x.f);
+  if (files.length < 2) return setStatus('비교할 사진을 2~4장 선택하세요.', 'error');
+  Object.assign(cmp, { files, scale: 1, cx: 0.5, cy: 0.5 });
+  $('compare-grid').style.gridTemplateColumns = `repeat(${files.length === 4 ? 2 : files.length}, 1fr)`;
+  $('compare-grid').replaceChildren(...files.map(({ rel, f }) => build('div', { className: 'pane' }, [
+    build('span', { className: 'label', textContent: `${f.name} · ${f.w}×${f.h}` }, []),
+    build('img', { src: imgUrl(rel, f.mtime), alt: '', onload: layoutCompare }, [])])));
+  $('compare').showModal();
+  requestAnimationFrame(layoutCompare);
+}
+// every pane fits its photo, then applies the shared scale around the shared center (cx, cy in 0..1)
+function layoutCompare() {
+  [...$('compare-grid').children].forEach((pane, i) => {
+    const { f } = cmp.files[i], img = pane.querySelector('img');
+    const W = pane.clientWidth, H = pane.clientHeight, fit = Math.min(W / f.w, H / f.h), k = fit * cmp.scale;
+    Object.assign(img.style, { width: `${f.w}px`, height: `${f.h}px`,
+      transform: `translate(${W / 2 - cmp.cx * f.w * k}px, ${H / 2 - cmp.cy * f.h * k}px) scale(${k})` });
+  });
+}
+$('compare-grid').addEventListener('wheel', e => {
+  e.preventDefault();
+  const pane = e.target.closest('.pane');
+  if (!pane) return;
+  const { f } = cmp.files[[...$('compare-grid').children].indexOf(pane)], r = pane.getBoundingClientRect();
+  const k = Math.min(r.width / f.w, r.height / f.h) * cmp.scale;
+  // keep the point under the cursor fixed while zooming
+  const px = cmp.cx + (e.clientX - r.left - r.width / 2) / (f.w * k), py = cmp.cy + (e.clientY - r.top - r.height / 2) / (f.h * k);
+  const next = Math.min(20, Math.max(1, cmp.scale * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
+  cmp.cx = px - (px - cmp.cx) * cmp.scale / next; cmp.cy = py - (py - cmp.cy) * cmp.scale / next;
+  cmp.scale = next;
+  if (next === 1) Object.assign(cmp, { cx: 0.5, cy: 0.5 });
+  layoutCompare();
+}, { passive: false });
+$('compare-grid').addEventListener('pointerdown', e => {
+  const pane = e.target.closest('.pane');
+  if (!pane || e.button !== 0) return;
+  e.preventDefault();
+  const { f } = cmp.files[[...$('compare-grid').children].indexOf(pane)], r = pane.getBoundingClientRect();
+  const k = Math.min(r.width / f.w, r.height / f.h) * cmp.scale, start = { x: e.clientX, y: e.clientY, cx: cmp.cx, cy: cmp.cy };
+  const move = ev => { cmp.cx = start.cx - (ev.clientX - start.x) / (f.w * k); cmp.cy = start.cy - (ev.clientY - start.y) / (f.h * k); layoutCompare(); };
+  addEventListener('pointermove', move);
+  addEventListener('pointerup', () => removeEventListener('pointermove', move), { once: true });
+});
+$('compare-grid').addEventListener('dblclick', () => { Object.assign(cmp, { scale: 1, cx: 0.5, cy: 0.5 }); layoutCompare(); });
+$('compare-close').onclick = () => $('compare').close();
+addEventListener('resize', () => { if ($('compare').open) layoutCompare(); });
+$('viewer-compare').onclick = () => { setSlideshow(false); openCompare(viewer.files.map(f => join(state.dir, f.name))); };
+
+function navigateViewer(step) {
+  const index = viewer.index + step;
+  if (index >= 0 && index < state.items.length) showViewer(index);
+}
+
+function toggleViewerFavorite() {
+  const f = viewer.file, rel = join(state.dir, f.name);
+  toggleFav([rel], !f.fav, () => { render(); renderViewerBar(); });
+}
+
+async function trashViewerFile() {
+  if (inTrash()) return;
+  const rel = join(state.dir, viewer.file.name), index = viewer.index;
+  const others = viewer.files.filter(f => f !== viewer.file).map(f => f.name);  // the original / edits that stay
+  try {
+    await trashRels([rel]);  // only the version on screen goes; the others stay in the folder
+    // stay with what is left of this photo: an edit whose original went is now an item of its own
+    const left = state.items.findIndex(item => others.includes(item.name) || item.versions?.some(v => others.includes(v.name)));
+    if (left >= 0) {
+      const files = [state.items[left], ...(state.items[left].versions || [])];
+      showViewer(left, Math.max(0, files.findIndex(f => others.includes(f.name))));
+    } else if (state.items.length) showViewer(Math.min(index, state.items.length - 1));
+    else $('dialog').close();
+  } catch (error) { setStatus(error.message, 'error'); }
+}
+
+async function moveViewerFile() {
+  const rel = join(state.dir, viewer.file.name);
+  try {
+    await openMover([rel], () => $('dialog').close());
+  } catch (error) { setStatus(error.message, 'error'); }
+}
+
+async function renameViewerFile() {
+  try {
+    await openRename([viewer.file.name], () => $('dialog').close());
+  } catch (error) { setStatus(error.message, 'error'); }
+}
+addEventListener('keydown', async e => {
+  if (!$('dialog').open || $('compare').open || $('metadata-dialog').open || e.ctrlKey || e.metaKey || e.altKey) return;
+  const f = viewer.file, rel = join(state.dir, f.name), n = viewer.files.length;
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    e.preventDefault();
+    navigateViewer(e.key === 'ArrowRight' ? 1 : -1);
+  } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (n > 1) showViewer(viewer.index, (viewer.version + (e.key === 'ArrowDown' ? 1 : n - 1)) % n);
+  } else if (e.key === ' ') {
+    e.preventDefault();
+    toggleSelect(rel);
+    renderViewerBar();
+  } else if (inTrash() && 'fFeEmMrR012345'.includes(e.key)) {
+    // trashed photos can only be looked at, restored or deleted (their buttons are hidden too)
+  } else if (/^[0-5]$/.test(e.key)) {
+    setMarks([rel], { rating: Number(e.key) });
+  } else if (e.key === 'p' || e.key === 'P') {
+    setSlideshow(!slide.timer);
+  } else if (e.key === 'f' || e.key === 'F') {
+    toggleViewerFavorite();
+  } else if (e.key === 'e' || e.key === 'E') {
+    openEditor(rel);
+  } else if (e.key === 'm' || e.key === 'M') {
+    await moveViewerFile();
+  } else if (e.key === 'r' || e.key === 'R') {
+    await renameViewerFile();
+  } else if (e.key === 'i' || e.key === 'I') {
+    showMetadata(rel);
+  } else if (e.key === 'Delete' && !inTrash()) {
+    e.preventDefault();
+    await trashViewerFile();
+  }
+});
+function applyZoom() {
+  const f = viewer.file, img = $('viewer-img');
+  img.style.width = `${f.w * viewer.fit * viewer.scale}px`;
+  img.style.height = `${f.h * viewer.fit * viewer.scale}px`;
+  $('viewer').classList.toggle('zoomed', viewer.scale > 1);
+  $('viewer-info').textContent = `${f.name} · ${f.w}×${f.h} · ${Math.round(viewer.fit * viewer.scale * 100)}%`;
+}
+$('viewer').addEventListener('wheel', e => {
+  e.preventDefault();
+  const box = $('viewer');
+  const rect = box.getBoundingClientRect();
+  const old = viewer.scale;
+  viewer.scale = Math.min(20, Math.max(0.1, old * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+  // keep the point under the cursor fixed
+  const px = (box.scrollLeft + e.clientX - rect.left) / old, py = (box.scrollTop + e.clientY - rect.top) / old;
+  applyZoom();
+  box.scrollLeft = px * viewer.scale - (e.clientX - rect.left);
+  box.scrollTop = py * viewer.scale - (e.clientY - rect.top);
+}, { passive: false });
+let drag = null;
+$('viewer').addEventListener('pointerdown', e => {
+  if (e.target.id !== 'viewer-img') return;
+  drag = { x: e.clientX, y: e.clientY, l: $('viewer').scrollLeft, t: $('viewer').scrollTop, moved: false };
+});
+addEventListener('pointermove', e => {
+  if (!drag) return;
+  drag.moved ||= Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 4;
+  $('viewer').scrollLeft = drag.l - (e.clientX - drag.x);
+  $('viewer').scrollTop = drag.t - (e.clientY - drag.y);
+});
+addEventListener('pointerup', () => { setTimeout(() => drag = null); });
+$('viewer').addEventListener('click', e => {
+  if (e.target.id !== 'viewer-img' && !drag?.moved) $('dialog').close();
+});
+$('viewer-img').addEventListener('dblclick', () => viewer.file && showMetadata(join(state.dir, viewer.file.name)));
+$('viewer-close').onclick = () => $('dialog').close();
+
+// --- library actions: favorites, trash, move, albums, duplicates, renaming ---
+const TRASH_DIR = '.yunaviewer/trash';
+const inTrash = () => state.dir === TRASH_DIR;
+const baseName = rel => rel.split('/').pop();
+const favOf = rel => !!state.files.find(f => f.name === baseName(rel))?.fav;
+
+async function api(url, body) {
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const contentType = res.headers.get('Content-Type') || '';
+  if (!contentType.includes('application/json')) {
+    await res.text();  // consume the response so the connection can be reused
+    if (res.status === 404) throw new Error('실행 중인 서버가 이 기능을 지원하지 않습니다. 서버를 재시작한 뒤 다시 시도하세요.');
+    throw new Error(`서버가 올바르지 않은 응답을 반환했습니다 (${res.status}).`);
+  }
+  const data = await res.json();
+  if (!res.ok) throw Object.assign(new Error(data.error || res.status), { needsIndex: data.needs_index || 0 });
+  return data;
+}
+
+// Photos reach the AI only when the user asked for it: the server refuses to analyze unindexed photos on its own,
+// answers "needs index" and we ask once; only an explicit yes retries with allow_index.
+async function withIndexConsent(call) {
+  try {
+    return await call(false);
+  } catch (error) {
+    if (!error.needsIndex) throw error;
+    if (!confirm(`AI 분석이 아직 안 된 이미지가 ${error.needsIndex}장 있어요.\n계속하면 이 이미지들을 Gemini로 전송해 분석합니다. 진행할까요?\n(취소하면 아무것도 전송하지 않아요)`)) {
+      throw new Error('AI 분석을 취소했습니다. 이미지는 전송하지 않았어요.');
+    }
+    return call(true);
+  }
+}
+
+function toggleGroup() {
+  state.group = !state.group;
+  localStorage.setItem('groupEdits', state.group ? '1' : '0');
+  masonry.target = BATCH;
+  render();
+}
+
+async function refresh() {  // reload the folder, keeping filter and selection for files that still exist
+  const res = await fetch(`/api/list?dir=${enc(state.dir)}`);
+  if (!res.ok) return;
+  Object.assign(state, await res.json());
+  const names = new Set(state.files.map(f => f.name));
+  if (state.filter) state.filter = new Set([...state.filter].filter(n => names.has(n)));
+  state.selected = new Set([...state.selected].filter(rel => names.has(baseName(rel))));
+  render();
+}
+
+async function emptyTrash() {
+  const count = state.files.length;
+  if (!count || !confirm(`휴지통의 사진 ${count}장을 완전히 삭제할까요?\n삭제한 파일은 되돌릴 수 없습니다.`)) return;
+  try {
+    const data = await api('/api/trash/empty', {});
+    await load(state.beforeTrash || '');  // back to where the trash was opened from
+    setStatus(`휴지통을 비웠습니다 (${data.count}장 삭제).`);
+  } catch (error) { setStatus(error.message, 'error'); }
+}
+
+// pick up photos added/removed outside the viewer; filter and selection stay for files that still exist
+// best of a group of similar photos, scored on this PC (sharp face, open eyes, exposure, size); the rest can go
+// to the trash in one click (undoable like any trash)
+async function pickBestShot(names) {
+  const dir = state.dir;
+  setStatus('베스트 컷 고르는 중… (선명도·눈·노출 비교)', 'busy');
+  try {
+    const data = await api('/api/bestshot', { paths: names.map(n => join(dir, n)) });
+    if (dir !== state.dir || !state.filter) return;
+    state.best = data.best;
+    render();
+    const best = data.shots.find(s => s.name === data.best), rest = names.filter(n => n !== data.best);
+    setStatus(`⭐ 베스트 컷: ${data.best}${best.reasons.length ? ` (${best.reasons.join(', ')})` : ''}`);
+    $('status').append(build('button', { textContent: `나머지 ${rest.length}장 휴지통으로`, onclick: async () => {
+      try {
+        await trashRels(rest.map(n => join(dir, n)));
+        state.best = null;
+      } catch (error) { setStatus(error.message, 'error'); }
+    } }, []));
+  } catch (error) { setStatus(`베스트 컷을 고르지 못했습니다: ${error.message}`, 'error'); }
+}
+
+// the model's answer to a question about the selected photos, kept until closed (it can be long)
+function showAnswer(question, data) {
+  setStatus('');
+  $('answer').hidden = false;
+  $('answer').replaceChildren(
+    build('div', { className: 'q', textContent: `Q. ${question} (${data.images.length}장)` }, []),
+    build('div', { className: 'a', textContent: data.answer || '답변을 받지 못했습니다.' }, []),
+    build('button', { className: 'x', textContent: '✕', title: '닫기', onclick: () => { $('answer').hidden = true; } }, []));
+}
+
+async function reloadFolder() {
+  const before = state.files.length, dir = state.dir;
+  await refresh();
+  if (dir !== state.dir) return;
+  const tags = await fetch(`/api/tags/list?dir=${enc(dir)}`).then(r => r.ok ? r.json() : { tags: {} }).catch(() => ({ tags: {} }));
+  if (dir !== state.dir) return;
+  state.tags = tags.tags || {};
+  if (state.smartActive) render();
+  await pollTagging(dir);  // ✨ / ✓: new photos may need indexing
+  const diff = state.files.length - before;
+  setStatus(diff > 0 ? `새 사진 ${diff}장을 불러왔습니다.` : diff < 0 ? `${-diff}장이 폴더에서 사라졌습니다.` : '새로고침했습니다. 바뀐 사진이 없습니다.');
+}
+
+function undoToast(text, op) {
+  setStatus(text);
+  $('status').append(build('button', { textContent: '되돌리기', onclick: async () => {
+    try {
+      const r = await api('/api/files/undo', { id: op });
+      await refresh();
+      setStatus(`${r.restored}장을 되돌렸습니다.` + (r.renamed ? ` (${r.renamed}장은 원래 이름이 이미 쓰이고 있어 _2 등을 붙였어요)` : ''));
+    } catch (error) { setStatus(error.message, 'error'); }
+  } }, []));
+}
+
+async function toggleFav(rels, value, onDone) {
+  try {
+    await api('/api/fav', { paths: rels, value });
+    const names = new Set(rels.map(baseName));
+    for (const f of [...state.files, ...state.items]) if (names.has(f.name)) f.fav = value;
+    onDone?.();
+  } catch (error) { setStatus(error.message, 'error'); }
+}
+
+async function trashRels(rels) {
+  const data = await api('/api/files/trash', { paths: rels });
+  const names = new Set(rels.map(baseName));
+  state.files = state.files.filter(f => !names.has(f.name));
+  state.selected = new Set([...state.selected].filter(rel => !names.has(baseName(rel))));
+  state.trashed = (state.trashed || 0) + data.count;  // the 🗑 badge; the folder is not reloaded here
+  render();
+  undoToast(`${data.count}장을 휴지통으로 보냈습니다.`, data.op);
+  return data;
+}
+
+function updateSelActions() {
+  const n = state.selected.size, box = $('sel-actions');
+  box.hidden = n === 0;
+  $('sel-clear').textContent = `✕ 선택 해제 (${n}장)`;
+  const allFav = n > 0 && [...state.selected].every(favOf);
+  const ratings = [...state.selected].map(rel => state.files.find(f => f.name === baseName(rel))?.rating || 0);
+  $('sel-stars').hidden = inTrash();
+  $('sel-stars').replaceChildren(...starButtons(ratings.every(r => r === ratings[0]) ? ratings[0] : 0,
+    r => setMarks([...state.selected], { rating: r })));
+  for (const b of box.querySelectorAll('button')) {
+    const trashOnly = ['restore', 'delete'].includes(b.dataset.act);
+    b.hidden = inTrash() ? !trashOnly : trashOnly;
+    if (b.dataset.act === 'compare') b.hidden ||= n < 2 || n > 4;
+    if (b.dataset.act === 'fav') b.textContent = allFav ? '☆ 즐겨찾기 해제' : '★ 즐겨찾기';
+  }
+}
+$('sel-clear').onclick = () => { state.selected.clear(); render(); };
+$('sel-actions').addEventListener('click', async e => {
+  const act = e.target.dataset?.act;
+  if (!act) return;
+  const rels = [...state.selected];
+  try {
+    if (act === 'fav') await toggleFav(rels, !rels.every(favOf), render);
+    else if (act === 'trash') await trashRels(rels);
+    else if (act === 'move') await openMover(rels);
+    else if (act === 'rename') await openRename(rels.map(baseName));
+    else if (act === 'compare') openCompare(rels);
+    else if (act === 'restore') {
+      const data = await api('/api/files/restore', { paths: rels });
+      state.selected.clear();
+      await refresh();
+      setStatus(`${data.count}장을 원래 위치로 복원했습니다.`);
+    } else if (act === 'delete') {
+      if (!confirm(`선택한 사진 ${rels.length}장을 완전히 삭제할까요?\n삭제한 파일은 되돌릴 수 없습니다.`)) return;
+      const data = await api('/api/trash/empty', { paths: rels });
+      state.selected.clear();
+      if (data.count === state.files.length) await load(state.beforeTrash || '');  // trash is empty now: leave it
+      else await refresh();
+      setStatus(`${data.count}장을 완전히 삭제했습니다.`);
+    }
+  } catch (error) { setStatus(error.message, 'error'); }
+});
+
+// move dialog: pick a folder (optionally create a sub folder in it)
+let moveRels = [], moveDest = '', moveDone = null;
+async function openMover(rels, onDone = null) {
+  moveRels = rels;
+  moveDest = state.dir;
+  $('new-folder').value = '';
+  const { dirs } = await (await fetch('/api/dirs')).json();
+  const list = $('dir-list');
+  list.replaceChildren(...dirs.map(d => {
+    const button = build('button', { textContent: d ? baseName(d) : '🏠 root', title: d || 'root',
+      className: d === moveDest ? 'sel' : '', onclick: () => {
+        moveDest = d;
+        for (const other of list.children) other.classList.toggle('sel', other === button);
+      } }, []);
+    button.style.paddingLeft = `${10 + (d ? d.split('/').length : 0) * 18}px`;
+    return button;
+  }));
+  moveDone = onDone;
+  $('mover').showModal();
+}
+$('mover-cancel').onclick = () => { moveDone = null; $('mover').close(); };
+$('mover-ok').onclick = async () => {
+  try {
+    const data = await api('/api/files/move', { paths: moveRels, dest: moveDest, new_folder: $('new-folder').value.trim() });
+    $('mover').close();
+    await refresh();
+    const done = moveDone;
+    moveDone = null;
+    done?.(data);
+    undoToast(`${data.count}장을 옮겼습니다.`, data.op);
+  } catch (error) { alert(error.message); }
+};
+
+// albums (grouped from stored descriptions) and duplicate finder share one panel
+async function showGroups(title, url, labelOf, tag, kinds = []) {
+  $('groups-title').textContent = title;
+  $('groups-kinds').replaceChildren(...kinds.map(([kind, label, active]) => build('button', {
+    textContent: label, className: active ? 'on' : '', onclick: () => openAlbums(kind) }, [])));
+  const list = $('group-list'), note = $('group-note');
+  list.replaceChildren();
+  note.hidden = false;
+  note.textContent = '불러오는 중…';
+  if (!$('groups').open) $('groups').showModal();
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    note.hidden = data.groups.length > 0 && !data.untagged;
+    note.textContent = data.untagged
+      ? `AI 분석이 안 된 이미지 ${data.untagged}장은 제외했어요. 상단 ✨ 버튼으로 이 폴더의 AI 색인을 만들면 앨범이 채워집니다.`
+      : !data.groups.length ? '표시할 그룹이 없습니다.' : '';
+    list.replaceChildren(...data.groups.map(g => build('button', { className: 'gcard', onclick: () => {
+      $('groups').close();
+      state.filter = new Set(g.names);
+      state.filterLabel = labelOf(g);
+      state.filterTag = tag;
+      state.selected.clear();
+      masonry.target = BATCH;
+      render();
+      $('grid-wrap').scrollTop = 0;
+      if (tag === '중복') pickBestShot(g.names);
+    } }, [
+      build('div', { className: 'thumbs' }, g.names.slice(0, 4).map(n =>
+        build('img', { src: thumbUrl(join(state.dir, n), state.files.find(f => f.name === n)?.mtime), loading: 'lazy', alt: '' }, []))),
+      build('div', { className: 'name', title: labelOf(g), textContent: labelOf(g) }, []),
+      build('div', { className: 'count', textContent: `${g.count}장` }, []),
+    ])));
+    return data;
+  } catch (error) { note.hidden = false; note.textContent = error.message; return { error: error.message }; }
+}
+function openAlbums(kind) {
+  const kinds = [['outfit', '의상'], ['hair', '헤어'], ['pose', '자세']];
+  return showGroups('자동 앨범', `/api/albums?dir=${enc(state.dir)}&kind=${kind}`, g => g.label,
+    `앨범(${kinds.find(([k]) => k === kind)[1]})`, kinds.map(([k, label]) => [k, label, k === kind]));
+}
+function openDuplicates() {
+  const dir = state.dir;
+  enqueueTask(`중복·유사 사진 찾기 · ${dir || 'root'}`, async progress => {
+    progress('유사도 계산 중…');
+    const data = await showGroups('중복·비슷한 사진', `/api/duplicates?dir=${enc(dir)}`,
+      g => (g.kind === 'exact' ? '완전 동일' : '비슷한 사진'), '중복');
+    if (data.error) throw new Error(data.error);
+    progress(data.groups.length ? `${data.groups.length}개 그룹` : '중복 없음');
+  });
+}
+$('groups-close').onclick = () => $('groups').close();
+
+// rename dialog: preview of myshare-style names, applied only after confirmation (and undoable)
+let renamePlan = [], renameDone = null;
+async function openRename(names, onDone = null) {
+  const note = $('rename-note'), table = $('rename-table');
+  table.replaceChildren();
+  note.textContent = '이름을 만드는 중… (처음에는 이미지 설명을 만드느라 시간이 걸릴 수 있어요)';
+  $('rename-ok').disabled = true;
+  $('rename-info').textContent = '';
+  renameDone = onDone;
+  if (!$('renamer').open) $('renamer').showModal();
+  try {
+    const data = await withIndexConsent(allow => api('/api/rename/plan', { dir: state.dir, names, allow_index: allow }));
+    renamePlan = data.plan;
+    table.replaceChildren(...data.plan.map(item => build('tr', {}, [
+      build('td', { textContent: item.name }, []), build('td', { textContent: '→' }, []),
+      build('td', { textContent: item.new_name }, [])])));
+    note.textContent = data.plan.length ? '' : '바꿀 파일이 없습니다.';
+    $('rename-info').textContent = `${data.plan.length}개 변경` + (data.skipped.length ? ` · ${data.skipped.length}개 제외` : '');
+    $('rename-ok').disabled = !data.plan.length;
+  } catch (error) { note.textContent = error.message; }
+}
+$('rename-cancel').onclick = () => { renameDone = null; $('renamer').close(); };
+$('rename-ok').onclick = async () => {
+  $('rename-ok').disabled = true;
+  try {
+    const data = await api('/api/rename/apply', { dir: state.dir, plan: renamePlan });
+    $('renamer').close();
+    state.selected.clear();
+    await refresh();
+    const done = renameDone;
+    renameDone = null;
+    done?.(data);
+    undoToast(`${data.count}개의 이름을 바꿨습니다.`, data.op);
+  } catch (error) { $('rename-note').textContent = error.message; $('rename-ok').disabled = false; }
+};
+
+// --- editor: all processing happens server side (/api/edit/*), the page only collects parameters ---
+const SLIDERS = [  // key, label, min, max, step, default
+  ['brightness', '밝기', 0, 2, 0.01, 1], ['contrast', '대비', 0, 2, 0.01, 1], ['saturation', '채도', 0, 2, 0.01, 1],
+  ['gamma', '감마 (중간톤)', 0.3, 3, 0.01, 1], ['temperature', '색온도', -100, 100, 1, 0], ['sharpness', '선명도', 0, 3, 0.01, 1],
+];
+const RATIOS = [['자유', 0], ['원본', -1], ['1:1', 1], ['4:5', 4 / 5], ['2:3', 2 / 3], ['9:16', 9 / 16], ['16:9', 16 / 9]];
+const ed = { rel: '', file: null, params: {}, cropMode: false, ratio: 0, timer: null, seq: 0 };
+
+for (const [key, label, min, max, step, def] of SLIDERS) {
+  const out = build('output', {}, []);
+  const input = build('input', { type: 'range', min, max, step, value: def, id: `ed-${key}` }, []);
+  input.oninput = () => { ed.params[key] = +input.value; out.textContent = (+input.value).toFixed(step < 1 ? 2 : 0); queuePreview(); };
+  input.onchange = commit;
+  input.ondblclick = () => { input.value = def; input.oninput(); commit(); };
+  $('ed-sliders').append(build('label', { className: 'slider' }, [label, out, input]));
+}
+const FACE_SLIDERS = [  // key, label, min, max, step, default (stored in ed.params.face)
+  ['brightness', '얼굴 밝기', 0.5, 1.8, 0.01, 1], ['tone', '얼굴 톤 (따뜻함)', -50, 50, 1, 0], ['smooth', '피부 보정', 0, 1, 0.01, 0],
+];
+for (const [key, label, min, max, step, def] of FACE_SLIDERS) {
+  const out = build('output', {}, []);
+  const input = build('input', { type: 'range', min, max, step, value: def, id: `ed-face-${key}` }, []);
+  input.oninput = () => { ed.params.face[key] = +input.value; out.textContent = (+input.value).toFixed(step < 1 ? 2 : 0); queuePreview(); };
+  input.onchange = commit;
+  input.ondblclick = () => { input.value = def; input.oninput(); commit(); };
+  $('ed-face-sliders').append(build('label', { className: 'slider' }, [label, out, input]));
+}
+
+function setBase() {  // size of the photo after rotation, in which crop and stretch are expressed
+  const swap = ed.params.orient.rot % 180 === 90;
+  ed.base = swap ? { w: ed.file.h, h: ed.file.w } : { w: ed.file.w, h: ed.file.h };
+}
+// the full photo in its current orientation (crop mode and hold-to-compare show it)
+function baseSrc() {
+  const { rot, flip } = ed.params.orient;
+  return rot || flip ? `/api/edit/base?path=${enc(ed.rel)}&rot=${rot}&flip=${flip ? 1 : 0}&v=${enc(ed.file.mtime)}` : imgUrl(ed.rel, ed.file.mtime);
+}
+// composition of the viewer's transform (mirror, then clockwise rotation) with a user action on the displayed image
+function orientBy(op) {
+  if (ed.cropMode) setCropMode(false);
+  let { rot, flip } = ed.params.orient;
+  if (op === 'cw') rot = (rot + 90) % 360;
+  else if (op === 'ccw') rot = (rot + 270) % 360;
+  else if (op === '180') rot = (rot + 180) % 360;
+  else if (op === 'flipH') { flip = !flip; rot = (360 - rot) % 360; }
+  else if (op === 'flipV') { flip = !flip; rot = (540 - rot) % 360; }
+  ed.params.orient = { rot, flip };
+  setBase();
+  ed.beforeKey = null;
+  // crop and stretch are expressed in the rotated photo, so they start over
+  setOutput({ x: 0, y: 0, w: ed.base.w, h: ed.base.h }, { w: ed.base.w, h: ed.base.h });
+  commit();
+}
+$('ed-orient').onclick = e => { if (e.target.dataset?.o) orientBy(e.target.dataset.o); };
+
+function syncBgUI() {
+  const bg = ed.params.bg;
+  for (const b of $('ed-bg').children) b.classList.toggle('on', b.dataset.m === bg.mode);
+  $('ed-bgamt-wrap').hidden = bg.mode !== 'blur';
+  $('ed-bgamt').value = bg.amount;
+  $('ed-bgamt-wrap').querySelector('output').textContent = (+bg.amount).toFixed(2);
+}
+function setBg(mode, amount) {
+  ed.params.bg = { mode, amount: amount ?? ed.params.bg.amount };
+  syncBgUI();
+  queuePreview();
+}
+$('ed-bg').onclick = e => { if (e.target.dataset?.m) { setBg(e.target.dataset.m); commit(); } };
+$('ed-bgamt').oninput = () => { ed.params.bg.amount = +$('ed-bgamt').value; syncBgUI(); queuePreview(); };
+$('ed-bgamt').onchange = commit;
+
+for (const [label, value] of RATIOS) {
+  const b = build('button', { textContent: label, onclick: () => setRatio(value) }, []);
+  b.dataset.ratio = value;
+  $('ed-ratios').append(b);
+}
+
+// editor message (top-left): progress text stays while work runs; results/errors stay for a few seconds
+// and come back after a progress message that interrupted them
+function edProgress(text) {
+  $('ed-busy').textContent = text;
+}
+function edNote(text, ms = 5000) {
+  ed.note = { text, until: Date.now() + ms };
+  edDone();
+}
+function edDone() {
+  clearTimeout(ed.noteTimer);
+  const left = ed.note ? ed.note.until - Date.now() : 0;
+  $('ed-busy').textContent = left > 0 ? ed.note.text : '';
+  if (left > 0) ed.noteTimer = setTimeout(edDone, left);
+}
+
+// --- undo/redo: snapshots of ed.params taken after each finished edit (not while in crop mode) ---
+function commit() {
+  if (ed.cropMode || ed.batch) return;
+  const snap = JSON.stringify(ed.params);
+  if (snap === ed.history[ed.hpos]) return;
+  ed.history = ed.history.slice(0, ed.hpos + 1);
+  ed.history.push(snap);
+  ed.hpos = ed.history.length - 1;
+  updateHistory();
+}
+function updateHistory() {
+  $('ed-undo').disabled = ed.hpos <= 0;
+  $('ed-redo').disabled = ed.hpos >= ed.history.length - 1;
+}
+const BODY_LABELS = {
+  arm_l_thickness: '왼팔 두께', arm_r_thickness: '오른팔 두께', arm_l: '왼팔 길이', arm_r: '오른팔 길이',
+  thigh_l_thickness: '왼허벅지 두께', thigh_r_thickness: '오른허벅지 두께', calf_l_thickness: '왼종아리 두께',
+  calf_r_thickness: '오른종아리 두께', thigh_l: '왼허벅지 길이', thigh_r: '오른허벅지 길이', calf_l: '왼종아리 길이',
+  calf_r: '오른종아리 길이', leg_l: '왼다리 길이', leg_r: '오른다리 길이', chest_silhouette: '가슴 폭',
+  waist_silhouette: '허리 폭', pelvis_silhouette: '골반 폭', head_silhouette: '머리 크기', upper: '상체 길이',
+  whole_body: '전신 크기',
+};
+function renderBody() {
+  const body = ed.params.body || [];
+  $('ed-body-wrap').hidden = !body.length;
+  $('ed-body').replaceChildren(...body.map(({ part, pct }) => build('span', { className: 'chip-b' }, [
+    `${BODY_LABELS[part] || part} ${pct > 0 ? '+' : ''}${pct}%`,
+    build('button', { textContent: '✕', title: '이 보정 제거', onclick: () => {
+      ed.params.body = body.filter(e => e.part !== part);
+      renderBody(); queuePreview(); commit();
+    } }, []),
+  ])));
+}
+
+// nose / eyes / lips / jaw: set by prompt only ("코를 작게", "턱선 갸름하게"), shown as removable chips
+const SHAPE_LABELS = { nose_size: '코 크기', eye_size: '눈 크기', upper_lip: '윗입술 두께', lower_lip: '아랫입술 두께', jaw_width: '턱선 폭' };
+function renderShape() {
+  const shape = ed.params.shape ||= {};
+  const keys = Object.keys(SHAPE_LABELS).filter(key => shape[key]);
+  $('ed-shape-wrap').hidden = !keys.length;
+  $('ed-shape').replaceChildren(...keys.map(key => build('span', { className: 'chip-b' }, [
+    `${SHAPE_LABELS[key]} ${shape[key] > 0 ? '+' : ''}${shape[key]}%`,
+    build('button', { textContent: '✕', title: '이 보정 제거', onclick: () => {
+      delete shape[key];
+      renderShape(); queuePreview(); commit();
+    } }, []),
+  ])));
+}
+
+// spot removal: strokes painted on the preview are stored in photo pixels (same space as the crop) and filled in
+// by the server; each stroke is one undo step
+function renderErase() {
+  const n = (ed.params.erase ||= []).length;
+  $('ed-erase-count').textContent = n ? `${n}곳` : '';
+  $('ed-erase-clear').hidden = !n;
+}
+function setEraseMode(on) {
+  if (on && ed.cropMode) setCropMode(false);
+  ed.eraseMode = on;
+  $('editor').classList.toggle('erasing', on);
+  $('ed-erase-mode').classList.toggle('on', on);
+  $('ed-erase-mode').textContent = on ? '🩹 지우기 끝내기' : '🩹 지우기 모드';
+  $('ed-brush-wrap').hidden = !on;
+  if (on && ed.compare) setCompare(false);  // the divider would sit in the way of the brush
+  else if (!on) updateCompare();
+  if (on) edNote('잡티나 자국 위를 칠하세요. 손을 떼면 주변 색으로 메웁니다.', 5000);
+}
+$('ed-erase-mode').onclick = () => setEraseMode(!ed.eraseMode);
+$('ed-erase-clear').onclick = () => { ed.params.erase = []; renderErase(); queuePreview(); commit(); };
+$('ed-brush').oninput = () => { $('ed-brush-wrap').querySelector('output').textContent = `${$('ed-brush').value}px`; };
+$('ed-brush').oninput();
+$('ed-paint').addEventListener('pointerdown', e => {
+  if (!ed.eraseMode || e.button !== 0) return;
+  e.preventDefault();
+  const canvas = $('ed-paint'), rect = canvas.getBoundingClientRect(), ctx = canvas.getContext('2d');
+  canvas.width = rect.width; canvas.height = rect.height;
+  const r = Number($('ed-brush').value) / 2, pts = [];
+  Object.assign(ctx, { strokeStyle: 'rgba(255,60,60,.55)', fillStyle: 'rgba(255,60,60,.55)', lineWidth: 2 * r, lineCap: 'round', lineJoin: 'round' });
+  const add = ev => {
+    const x = ev.clientX - rect.left, y = ev.clientY - rect.top, last = pts.at(-1);
+    if (last && Math.hypot(x - last[0], y - last[1]) < 2) return;
+    pts.push([x, y]);
+    ctx.beginPath();
+    if (last) { ctx.moveTo(last[0], last[1]); ctx.lineTo(x, y); ctx.stroke(); }
+    else { ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
+  };
+  add(e);
+  const up = () => {
+    removeEventListener('pointermove', add);
+    removeEventListener('pointerup', up);
+    // preview pixels -> photo pixels of the current crop
+    const { crop } = ed.params, sx = crop.w / rect.width, sy = crop.h / rect.height;
+    const stroke = { r: Math.round(r * (sx + sy) / 2 * 10) / 10,
+      pts: pts.map(([x, y]) => [Math.round(crop.x + x * sx), Math.round(crop.y + y * sy)]) };
+    ed.params.erase.push(stroke);
+    // rough painted area against the photo: big patches come out smeared, say so
+    let length = 0;
+    for (let i = 1; i < stroke.pts.length; i++) length += Math.hypot(stroke.pts[i][0] - stroke.pts[i - 1][0], stroke.pts[i][1] - stroke.pts[i - 1][1]);
+    const area = length * 2 * stroke.r + Math.PI * stroke.r ** 2;
+    if (area > 0.03 * ed.base.w * ed.base.h) edNote('넓은 영역은 결과가 어색할 수 있어요. 작게 나눠 칠하면 더 자연스러워요.', 6000);
+    renderErase();
+    queuePreview();
+    commit();
+    $('ed-img').addEventListener('load', () => ctx.clearRect(0, 0, canvas.width, canvas.height), { once: true });
+  };
+  addEventListener('pointermove', add);
+  addEventListener('pointerup', up);
+});
+
+function restore(pos) {
+  if (pos < 0 || pos >= ed.history.length) return;
+  if (ed.cropMode) setCropMode(false);  // an unapplied box is dropped
+  ed.hpos = pos;
+  ed.params = JSON.parse(ed.history[pos]);
+  setBase();
+  for (const [key, , , , , def] of SLIDERS) { $(`ed-${key}`).value = ed.params[key] ?? def; $(`ed-${key}`).oninput(); }
+  for (const [key, , , , , def] of FACE_SLIDERS) { $(`ed-face-${key}`).value = ed.params.face[key] ?? def; $(`ed-face-${key}`).oninput(); }
+  syncBgUI();
+  setOutput(ed.params.crop, ed.params.size);
+  renderBody();
+  renderShape();
+  renderErase();
+  updateHistory();
+}
+$('ed-undo').onclick = () => restore(ed.hpos - 1);
+$('ed-redo').onclick = () => restore(ed.hpos + 1);
+addEventListener('keydown', e => {
+  if (!$('editor').open || !(e.ctrlKey || e.metaKey)) return;
+  const key = e.key.toLowerCase();
+  if (key === 'z' || key === 'y') {
+    e.preventDefault();
+    restore(ed.hpos + (key === 'y' || e.shiftKey ? 1 : -1));
+  }
+});
+
+// AI auto correction: the server renders the current crop/stretch and asks the model for slider values
+$('ed-auto').onclick = async () => {
+  if (ed.cropMode) setCropMode(false);
+  $('ed-auto').disabled = true;
+  edProgress('AI가 보정 값을 계산하는 중…');
+  try {
+    const res = await fetch('/api/edit/auto', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: ed.rel, params: ed.params }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    for (const [key] of SLIDERS) { $(`ed-${key}`).value = data[key]; $(`ed-${key}`).oninput(); }
+    commit();
+    edNote(data.message || '자동 보정 적용됨');
+  } catch (error) {
+    edNote(`자동 보정 실패: ${error.message}`, 8000);
+  } finally {
+    $('ed-auto').disabled = false;
+  }
+};
+
+// prompt in the editor: the model maps the instruction to control values; image search is not offered here
+async function editCommand(prompt) {
+  setStatus('AI가 편집 명령을 해석하는 중…', 'busy');
+  try {
+    if (ed.cropMode) setCropMode(false);
+    const controls = Object.fromEntries(SLIDERS.map(([key, , min, max]) => [key, [min, max, ed.params[key]]]));
+    controls.width = [1, 12000, ed.params.size.w];
+    controls.height = [1, 12000, ed.params.size.h];
+    for (const [key, , min, max] of FACE_SLIDERS) controls[`face_${key}`] = [min, max, ed.params.face[key]];
+    controls.background_blur = [0, 1, ed.params.bg.amount];
+    controls.background = ed.params.bg.mode;
+    for (const key of Object.keys(SHAPE_LABELS)) controls[key] = [-20, 20, ed.params.shape?.[key] || 0];
+    const res = await fetch('/api/edit/command', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, controls, body: ed.params.body || [], path: ed.rel, params: ed.params }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    ed.batch = true;  // one undo step for the whole command
+    if (data.reset) resetEditor();
+    if (data.rotate) orientBy(data.rotate);  // 'cw' | 'ccw' | '180', same names as the buttons
+    if (data.flip) orientBy(data.flip === 'horizontal' ? 'flipH' : 'flipV');
+    if (data.crop_ratio) {
+      setCropMode(true);
+      setRatio(data.crop_ratio === 'original' ? -1 : RATIOS.find(([label]) => label === data.crop_ratio)[1]);
+      setCropMode(false, true);
+    }
+    if (data.body) { ed.params.body = data.body; renderBody(); queuePreview(); }
+    const shape = ed.params.shape ||= {};
+    if (Object.keys(SHAPE_LABELS).some(key => data[key] != null)) {
+      for (const key of Object.keys(SHAPE_LABELS)) {
+        if (data[key] == null) continue;
+        const pct = Math.round(Math.max(-20, Math.min(20, data[key])));
+        if (pct) shape[key] = pct; else delete shape[key];
+      }
+      renderShape(); queuePreview();
+    }
+    if (data.background) setBg(data.background, data.background_blur ?? undefined);
+    else if (data.background_blur != null) setBg(ed.params.bg.mode, data.background_blur);
+    for (const [key] of FACE_SLIDERS) {
+      if (data[`face_${key}`] == null) continue;
+      $(`ed-face-${key}`).value = data[`face_${key}`];
+      $(`ed-face-${key}`).oninput();
+    }
+    if (data.width || data.height) {
+      setOutput(ed.params.crop, { w: Math.min(12000, Math.max(1, data.width || ed.params.size.w)),
+                                  h: Math.min(12000, Math.max(1, data.height || ed.params.size.h)) });
+    }
+    for (const [key] of SLIDERS) {
+      if (data[key] == null) continue;
+      $(`ed-${key}`).value = data[key];  // range input clamps to [min, max]
+      $(`ed-${key}`).oninput();
+    }
+    ed.batch = false;
+    commit();
+    setStatus(data.message || '적용했습니다.');
+    edNote(data.message || '적용했습니다.');
+    if (data.auto_enhance) $('ed-auto').click();
+  } catch (error) {
+    ed.batch = false;
+    setStatus(error.message, 'error');
+  }
+}
+
+function clearEditorPreview() {
+  clearTimeout(ed.timer);
+  ed.timer = null;
+  ed.seq++;  // invalidate a preview response that belongs to the previously opened image
+  ed.beforeKey = null;
+  const img = $('ed-img'), before = $('ed-before');
+  img.style.visibility = 'hidden';
+  img.removeAttribute('src');
+  before.removeAttribute('src');
+  if (ed.preview) URL.revokeObjectURL(ed.preview);
+  if (ed.beforeUrl) URL.revokeObjectURL(ed.beforeUrl);
+  ed.preview = ed.beforeUrl = null;
+}
+
+function openEditor(rel) {
+  const file = state.files.find(f => join(state.dir, f.name) === rel);
+  if (!file) return setStatus('현재 폴더의 이미지만 편집할 수 있습니다.', 'error');
+  clearEditorPreview();
+  Object.assign(ed, { rel, file, cropMode: false, ratio: 0, zoom: 1, history: [], hpos: -1, beforeKey: null, note: null });
+  edDone();
+  setCompare(false);
+  $('ed-name').textContent = file.name;
+  new Image().src = imgUrl(rel, file.mtime);  // warm the cache for crop mode and hold-to-compare
+  resetEditor();
+  $('dialog').close();
+  if (!$('editor').open) $('editor').showModal();
+  $('editor').append($('prompt'));  // the shared prompt becomes the editor's command line
+  setPromptMode('edit');
+  $('ed-nav').hidden = false;
+  const itemIndex = state.items.findIndex(item => item.name === file.name || (EDIT_RE.test(file.name) && item.name.replace(/\.[^.]+$/, '') === file.name.match(EDIT_RE)[1]));
+  $('ed-prev').disabled = itemIndex <= 0;
+  $('ed-next').disabled = itemIndex < 0 || itemIndex >= state.items.length - 1;
+  $('ed-apply-selected').hidden = state.selected.size < 2;
+  $('prompt-input').placeholder = '예: 밝기를 0.2 올려줘 / 허벅지를 살짝 두껍게 / 정사각형으로 잘라줘';
+  $('prompt-send').textContent = '적용';
+  setStatus('');
+  layoutPreview();  // the stage has a size only once the dialog is open
+}
+
+function moveEditor(step) {
+  const currentFile = baseName(ed.rel);
+  const current = state.items.findIndex(item => item.name === currentFile || (EDIT_RE.test(currentFile) && item.name.replace(/\.[^.]+$/, '') === currentFile.match(EDIT_RE)[1]));
+  const next = state.items[current + step];
+  if (!next) return;
+  if (ed.hpos > 0 && !confirm('저장하지 않은 편집 내용이 있습니다. 버리고 다른 이미지로 이동할까요?')) return;
+  openEditor(join(state.dir, next.name));
+}
+$('ed-prev').onclick = () => moveEditor(-1);
+$('ed-next').onclick = () => moveEditor(1);
+$('ed-apply-selected').onclick = () => {
+  const paths = [...state.selected];
+  if (paths.length < 2 || !confirm(`현재 편집 설정을 선택한 ${paths.length}장에 적용해 새 편집본을 만들까요?`)) return;
+  const params = JSON.parse(JSON.stringify(ed.params));
+  params.erase = [];  // painted spots belong to this photo only
+  enqueueTask(`선택 이미지 일괄 편집 · ${paths.length}장`, async progress => {
+    for (let i = 0; i < paths.length; i++) {
+      const result = await api('/api/edit/save', {path: paths[i], params});
+      progress(`${i + 1}/${paths.length} · ${result.name}`);
+    }
+    await refresh();
+  });
+};
+
+function resetEditor() {
+  const { w, h } = ed.file;
+  ed.zoom = 1;
+  ed.params = { crop: { x: 0, y: 0, w, h }, size: { w, h }, body: [], orient: { rot: 0, flip: false },
+                bg: { mode: 'none', amount: 0.5 }, face: { brightness: 1, tone: 0, smooth: 0 }, shape: {}, erase: [] };
+  setBase();
+  renderBody();
+  renderShape();
+  renderErase();
+  setEraseMode(false);
+  syncBgUI();
+  for (const [key, , , , step, def] of SLIDERS) { $(`ed-${key}`).value = def; $(`ed-${key}`).oninput(); }
+  for (const [key, , , , , def] of FACE_SLIDERS) { $(`ed-face-${key}`).value = def; $(`ed-face-${key}`).oninput(); }
+  $('ed-lock').checked = true;
+  setCropMode(false);
+  setRatio(0);
+  setOutput(ed.params.crop, ed.params.size);
+  commit();
+}
+
+function setOutput(crop, size) {
+  ed.params.crop = crop;
+  ed.params.size = size;
+  $('ed-w').value = size.w; $('ed-h').value = size.h;
+  layoutPreview();
+  queuePreview();
+}
+
+// Crop mode works in the current *stretched* space: the whole original scaled by the current stretch factors.
+// The box lives in that space (ed.box); applying maps it back to an original-pixel crop + an output size,
+// so the stretch is kept and later crops refine earlier ones.
+function cropSpace() {
+  const { crop, size } = ed.params, fx = size.w / crop.w, fy = size.h / crop.h;
+  return { fx, fy, W: Math.round(ed.base.w * fx), H: Math.round(ed.base.h * fy) };
+}
+
+function setRatio(value) {
+  ed.ratio = value;
+  for (const b of $('ed-ratios').children) b.classList.toggle('on', +b.dataset.ratio === value);
+  if (!ed.cropMode) return;
+  const { W, H } = ed.space, r = value === -1 ? W / H : value;
+  if (!r) return;
+  // largest box of that ratio that fits the whole image (not the current box, or presses compound),
+  // centered on the current box
+  const c = ed.box;
+  let w = W, h = Math.round(w / r);
+  if (h > H) { h = H; w = Math.round(h * r); }
+  const cx = c.x + c.w / 2, cy = c.y + c.h / 2;
+  setBox({ x: Math.round(Math.min(W - w, Math.max(0, cx - w / 2))), y: Math.round(Math.min(H - h, Math.max(0, cy - h / 2))), w, h });
+}
+
+function setBox(b) {
+  ed.box = b;
+  $('ed-w').value = b.w; $('ed-h').value = b.h;  // the box size is the output size it would produce
+  drawBox();
+}
+
+// leaving crop mode keeps the box only when applied (double-click inside it); otherwise nothing changes
+function setCropMode(on, apply = false) {
+  if (on && ed.eraseMode) setEraseMode(false);
+  if (on !== ed.cropMode) ed.zoom = 1;  // each mode starts fitted
+  if (on && ed.compare) setCompare(false);  // updateCompare() turns it back on after the crop
+  if (on && !ed.cropMode) {
+    ed.space = cropSpace();
+    const { crop, size } = ed.params, { fx, fy } = ed.space;
+    ed.box = { x: Math.round(crop.x * fx), y: Math.round(crop.y * fy), w: size.w, h: size.h };
+  }
+  if (!on && ed.cropMode) {
+    if (apply) {
+      const { fx, fy } = ed.space, b = ed.box;
+      const x = Math.round(b.x / fx), y = Math.round(b.y / fy);
+      setOutput({ x, y, w: Math.max(1, Math.min(ed.base.w - x, Math.round(b.w / fx))),
+                  h: Math.max(1, Math.min(ed.base.h - y, Math.round(b.h / fy))) }, { w: b.w, h: b.h });
+    } else {
+      $('ed-w').value = ed.params.size.w; $('ed-h').value = ed.params.size.h;
+    }
+  }
+  ed.cropMode = on;
+  $('ed-crop').classList.toggle('on', on);
+  $('ed-stretch-mode').classList.toggle('on', !on);
+  $('ed-box').hidden = !on;
+  $('ed-stretch').hidden = on;
+  $('editor').classList.toggle('cropping', on);
+  for (const b of $('ed-ratios').children) b.disabled = !on;  // ratios only shape the crop box
+  if (apply) commit();
+  $('ed-w').readOnly = $('ed-h').readOnly = on;  // in crop mode the fields show the box size
+  if (on) $('ed-img').src = baseSrc();  // the full photo in its current orientation, stretched by CSS
+  layoutPreview();
+  drawBox();
+  queuePreview();
+}
+$('ed-crop').onclick = () => setCropMode(true);
+$('ed-stretch-mode').onclick = () => setCropMode(false);  // leaving crop mode without applying = cancel
+$('ed-box').addEventListener('dblclick', () => setCropMode(false, true));
+
+// box position in screen pixels <-> box in stretched-space pixels
+function drawBox() {
+  if (!ed.cropMode) return;
+  const k = $('ed-img').clientWidth / ed.space.W, b = ed.box;
+  Object.assign($('ed-box').style, { left: `${b.x * k}px`, top: `${b.y * k}px`, width: `${b.w * k}px`, height: `${b.h * k}px` });
+}
+
+// crop mode drag normally draws or moves the box, so panning a zoomed view uses the middle button or Space+drag
+let spaceHeld = false;
+addEventListener('keydown', e => {
+  if (e.code === 'Space' && $('editor').open && !['INPUT', 'TEXTAREA', 'BUTTON'].includes(document.activeElement.tagName)) {
+    spaceHeld = true;
+    e.preventDefault();
+  }
+});
+addEventListener('keyup', e => { if (e.code === 'Space') spaceHeld = false; });
+function startPan(e) {
+  const st = $('ed-stage'), sx = e.clientX, sy = e.clientY, left = st.scrollLeft, top = st.scrollTop;
+  document.body.style.cursor = 'grabbing';
+  const move = ev => { st.scrollLeft = left - (ev.clientX - sx); st.scrollTop = top - (ev.clientY - sy); };
+  const up = () => {
+    removeEventListener('pointermove', move);
+    removeEventListener('pointerup', up);
+    document.body.style.cursor = '';
+  };
+  addEventListener('pointermove', move);
+  addEventListener('pointerup', up);
+}
+
+$('ed-wrap').addEventListener('pointerdown', e => {
+  if (!ed.cropMode) return;
+  e.preventDefault();
+  if (e.button === 1 || spaceHeld) return startPan(e);
+  if (e.button !== 0) return;
+  const img = $('ed-img'), { W, H } = ed.space, k = img.clientWidth / W, rect = img.getBoundingClientRect();
+  const start = { ...ed.box };
+  const px = ev => [Math.min(W, Math.max(0, (ev.clientX - rect.left) / k)), Math.min(H, Math.max(0, (ev.clientY - rect.top) / k))];
+  const [sx, sy] = px(e);
+  const handle = e.target.dataset.h || (e.target.id === 'ed-box' ? 'move' : 'new');
+  const ratio = ed.ratio === -1 ? W / H : ed.ratio;
+  const move = ev => {
+    const [x, y] = px(ev);
+    let c;
+    if (handle === 'move') {
+      c = { ...start, x: Math.min(W - start.w, Math.max(0, start.x + x - sx)), y: Math.min(H - start.h, Math.max(0, start.y + y - sy)) };
+    } else {
+      // fixed corner = opposite of the dragged one (or the press point for a new box)
+      const fx = handle === 'new' ? sx : handle.includes('w') ? start.x + start.w : start.x;
+      const fy = handle === 'new' ? sy : handle.includes('n') ? start.y + start.h : start.y;
+      let w = Math.abs(x - fx), h = Math.abs(y - fy);
+      if (ratio) { if (w / h > ratio) w = h * ratio; else h = w / ratio; }
+      c = { x: x < fx ? fx - w : fx, y: y < fy ? fy - h : fy, w, h };
+    }
+    setBox({ x: Math.round(c.x), y: Math.round(c.y), w: Math.max(8, Math.round(c.w)), h: Math.max(8, Math.round(c.h)) });
+  };
+  const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); };
+  addEventListener('pointermove', move);
+  addEventListener('pointerup', up);
+});
+
+// stretch by dragging the right edge, bottom edge or bottom-right corner of the preview
+$('ed-stretch').addEventListener('pointerdown', e => {
+  const side = e.target.dataset.s;
+  if (!side) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const img = $('ed-img'), start = { ...ed.params.size }, k = previewScale();
+  const sx = e.clientX, sy = e.clientY, c = ed.params.crop;
+  const lockWas = $('ed-lock').checked;
+  const keep = side === 'se' && lockWas;
+  let moved = false;
+  const move = ev => {
+    if (!moved) {
+      moved = true;
+      if (side !== 'se') $('ed-lock').checked = false;  // an edge drag is a one-axis stretch
+    }
+    let w = start.w, h = start.h;
+    if (side.includes('e')) w = Math.max(1, Math.round(start.w + (ev.clientX - sx) / k));
+    if (side.includes('s')) h = Math.max(1, Math.round(start.h + (ev.clientY - sy) / k));
+    if (keep) h = Math.round(w * c.h / c.w);
+    w = Math.min(w, 12000); h = Math.min(h, 12000);
+    ed.params.size = { w, h };
+    $('ed-w').value = w; $('ed-h').value = h;
+    layoutPreview();  // live; the rendered preview follows on release
+    edProgress(`${w} × ${h}`);
+  };
+  const up = () => {
+    removeEventListener('pointermove', move);
+    removeEventListener('pointerup', up);
+    if (moved) edNote(`크기 ${ed.params.size.w} × ${ed.params.size.h}`, 3000); else edDone();
+    if (moved) { queuePreview(); commit(); }
+  };
+  addEventListener('pointermove', move);
+  addEventListener('pointerup', up);
+});
+
+function sizeInput(changed) {
+  const c = ed.params.crop;
+  let w = +$('ed-w').value || 1, h = +$('ed-h').value || 1;
+  if ($('ed-lock').checked) {
+    if (changed === 'w') h = Math.round(w * c.h / c.w); else w = Math.round(h * c.w / c.h);
+    $('ed-w').value = w; $('ed-h').value = h;
+  }
+  ed.params.size = { w, h };
+  layoutPreview();
+  queuePreview();
+}
+$('ed-w').onchange = $('ed-h').onchange = commit;
+$('ed-w').oninput = () => sizeInput('w');
+$('ed-h').oninput = () => sizeInput('h');
+
+function queuePreview() {
+  clearTimeout(ed.timer);
+  if (ed.cropMode || !ed.file) return;
+  ed.timer = setTimeout(async () => {
+    const seq = ++ed.seq;
+    edProgress(ed.params.body?.length ? '미리보기 생성 중… (체형 보정은 처음 한 번 수 초)' : '미리보기 생성 중…');
+    const res = await fetch('/api/edit/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: ed.rel, params: ed.params }) });
+    if (seq !== ed.seq) return;  // a newer request superseded this one
+    if (!res.ok) { edNote((await res.json()).error, 8000); return; }
+    const trim = Number(res.headers.get('X-Trim-Bottom') || 0), { crop, size } = ed.params, limit = ed.base.h - trim;
+    if (trim && crop.y + crop.h > limit) {  // shortened legs left an empty band under the feet: crop it away
+      const h = Math.max(1, limit - crop.y);
+      edNote('다리 보정으로 생긴 발 아래 빈 부분을 잘라냈어요.', 6000);
+      const amend = ed.history[ed.hpos] === JSON.stringify(ed.params);
+      setOutput({ ...crop, h }, { w: size.w, h: Math.max(1, Math.round(size.h * h / crop.h)) });
+      // part of the step that caused it: undo goes straight back to the photo before the leg edit
+      if (amend) ed.history[ed.hpos] = JSON.stringify(ed.params);
+      return;  // setOutput asked for a new preview with the new crop
+    }
+    const blob = await res.blob();
+    if (seq !== ed.seq) return;
+    if (ed.preview) URL.revokeObjectURL(ed.preview);
+    ed.preview = URL.createObjectURL(blob);
+    $('ed-img').src = ed.preview;
+    edDone();
+    updateCompare();
+  }, 120);
+}
+
+// before/after compare, shown automatically when color, body or face shape edits exist (not for crop/stretch alone).
+// "before" = same crop/size without those edits, so both sides are pixel-aligned.
+function hasEffects() {
+  const { body = [], bg, face = {}, shape = {}, erase = [] } = ed.params;
+  return body.length > 0 || erase.length > 0 || Object.values(shape).some(Boolean) || (bg?.mode || 'none') !== 'none'
+    || FACE_SLIDERS.some(([key, , , , , def]) => (face[key] ?? def) !== def)
+    || SLIDERS.some(([key, , , , , def]) => (ed.params[key] ?? def) !== def);
+}
+function updateCompare() {
+  const on = !ed.cropMode && hasEffects();
+  if (on !== !!ed.compare) setCompare(on);
+  else if (on) loadBefore();
+}
+async function loadBefore() {
+  const params = { crop: ed.params.crop, size: ed.params.size, orient: ed.params.orient };
+  const key = ed.rel + JSON.stringify(params);
+  if (key === ed.beforeKey) return;
+  ed.beforeKey = key;
+  const res = await fetch('/api/edit/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: ed.rel, params }) });
+  if (!res.ok || key !== ed.beforeKey) return;
+  const blob = await res.blob();
+  if (key !== ed.beforeKey) return;
+  if (ed.beforeUrl) URL.revokeObjectURL(ed.beforeUrl);
+  ed.beforeUrl = URL.createObjectURL(blob);
+  $('ed-before').src = ed.beforeUrl;
+}
+function setSplit(pct) {
+  ed.split = Math.min(100, Math.max(0, pct));
+  $('ed-divider').style.left = `${ed.split}%`;
+  $('ed-before').style.clipPath = `inset(0 ${100 - ed.split}% 0 0)`;
+}
+function setCompare(on) {
+  ed.compare = on;
+  $('ed-before').hidden = $('ed-divider').hidden = !on;
+  if (on) { setSplit(ed.split ?? 50); loadBefore(); }
+}
+$('ed-divider').addEventListener('pointerdown', e => {
+  e.preventDefault();
+  e.stopPropagation();
+  const rect = $('ed-wrap').getBoundingClientRect();
+  const move = ev => setSplit((ev.clientX - rect.left) / rect.width * 100);
+  const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); };
+  addEventListener('pointermove', move);
+  addEventListener('pointerup', up);
+});
+
+// screen pixels per output pixel: the crop fits the stage at 1x, so a stretched output shows larger/smaller
+function previewScale() {
+  const st = $('ed-stage'), c = ed.params.crop;
+  return Math.max(0.01, Math.min((st.clientWidth - 40) / c.w, (st.clientHeight - 40) / c.h)) * ed.zoom;
+}
+function cropScale() {  // crop mode: the whole stretched image fits the stage
+  const st = $('ed-stage');
+  return Math.max(0.01, Math.min((st.clientWidth - 40) / ed.space.W, (st.clientHeight - 40) / ed.space.H)) * ed.zoom;
+}
+
+// wheel over the preview zooms the view around the cursor in both stretch and crop mode (the output size and the
+// crop box are unchanged; only the view scales); double-click on the image = fit
+$('ed-stage').addEventListener('wheel', e => {
+  if (!ed.file) return;
+  e.preventDefault();
+  const st = $('ed-stage'), img = $('ed-img'), before = img.getBoundingClientRect();
+  const fx = (e.clientX - before.left) / before.width, fy = (e.clientY - before.top) / before.height;
+  ed.zoom = Math.min(10, Math.max(0.1, ed.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+  layoutPreview();
+  drawBox();  // crop mode: the box is positioned in screen pixels of the scaled image
+  const after = img.getBoundingClientRect();  // keep the point under the cursor fixed
+  st.scrollLeft += after.left + fx * after.width - e.clientX;
+  st.scrollTop += after.top + fy * after.height - e.clientY;
+  edNote(`보기 ${Math.round(ed.zoom * 100)}%`, 2500);
+}, { passive: false });
+$('ed-img').addEventListener('dblclick', () => { if (!ed.cropMode) { ed.zoom = 1; layoutPreview(); } });
+// the image box size comes from the output size (not from the loaded image), so swapping src never resizes it
+function layoutPreview() {
+  const img = $('ed-img');
+  if (ed.cropMode) {
+    const k = cropScale();
+    return Object.assign(img.style, { width: `${ed.space.W * k}px`, height: `${ed.space.H * k}px` });
+  }
+  const k = previewScale(), { w, h } = ed.params.size;
+  Object.assign(img.style, { width: `${w * k}px`, height: `${h * k}px` });
+}
+
+// drag the preview to pan (when zoomed); press and hold still (no movement) to see the original
+function endCompare() {
+  clearTimeout(ed.holdTimer);
+  if (!ed.held) return;
+  $('ed-img').addEventListener('load', () => { $('ed-img').style.objectFit = ''; }, { once: true });
+  $('ed-img').src = ed.held;
+  ed.held = null;
+}
+$('ed-img').addEventListener('pointerdown', e => {
+  if (ed.cropMode || ed.eraseMode || e.button !== 0) return;
+  e.preventDefault();
+  const st = $('ed-stage'), sx = e.clientX, sy = e.clientY, left = st.scrollLeft, top = st.scrollTop;
+  let panning = false;
+  ed.holdTimer = setTimeout(() => {
+    $('ed-img').style.objectFit = 'contain';  // original may have another aspect than a stretched output
+    ed.held = $('ed-img').src;
+    $('ed-img').src = baseSrc();
+  }, 400);
+  const move = ev => {
+    if (!panning && Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) < 5) return;
+    if (!panning) { panning = true; endCompare(); $('ed-img').style.cursor = 'grabbing'; }
+    st.scrollLeft = left - (ev.clientX - sx);
+    st.scrollTop = top - (ev.clientY - sy);
+  };
+  const up = () => {
+    removeEventListener('pointermove', move);
+    removeEventListener('pointerup', up);
+    $('ed-img').style.cursor = '';
+    endCompare();
+  };
+  addEventListener('pointermove', move);
+  addEventListener('pointerup', up);
+});
+$('ed-img').onload = () => { $('ed-img').style.visibility = ''; drawBox(); };
+
+$('ed-reset').onclick = resetEditor;
+$('ed-cancel').onclick = () => $('editor').close();
+$('editor').addEventListener('close', () => {
+  clearEditorPreview();
+  $('ed-nav').hidden = true;
+  document.body.append($('prompt'));
+  setPromptMode('search');
+  $('prompt-input').placeholder = SEARCH_PLACEHOLDER;
+  $('prompt-send').textContent = '검색';
+});
+$('prompt-hide').onclick = () => {
+  const hidden = $('prompt').classList.toggle('prompt-hidden');
+  localStorage.setItem('promptHidden', hidden ? '1' : '0');
+  $('prompt-hide').textContent = hidden ? '표시' : '숨김';
+  // the mouse is still over the prompt and the button has focus, which would keep it shown by :hover/:focus-within
+  if (hidden) { $('prompt-hide').blur(); $('prompt').classList.add('hold'); }
+};
+$('prompt').addEventListener('mouseleave', () => $('prompt').classList.remove('hold'));
+$('prompt-opacity').value = localStorage.getItem('promptOpacity') || '94';
+$('prompt-opacity').oninput = () => {
+  const opacity = Number($('prompt-opacity').value) / 100;
+  $('prompt').style.background = `rgba(32,32,32,${opacity})`;
+  localStorage.setItem('promptOpacity', $('prompt-opacity').value);
+};
+$('prompt-opacity').oninput();
+if (localStorage.getItem('promptHidden') === '1') { $('prompt').classList.add('prompt-hidden'); $('prompt-hide').textContent = '표시'; }
+new ResizeObserver(() => {
+  $('editor').style.setProperty('--editor-prompt-clearance', `${Math.max(160, $('prompt').getBoundingClientRect().height + 32)}px`);
+}).observe($('prompt'));
+
+addEventListener('keydown', async e => {
+  if ($('dialog').open || $('editor').open || $('groups').open || $('mover').open || $('renamer').open ||
+      $('smart-album').open || $('task-manager').open || $('metadata-dialog').open || $('compare').open ||
+      e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.target.matches('input,textarea,select,[contenteditable="true"]')) return;
+  if (e.key === '/') { e.preventDefault(); $('prompt-input').focus(); return; }
+  const rels = [...state.selected];
+  if (e.key === 'f' || e.key === 'F') { if (rels.length) await toggleFav(rels, !rels.every(favOf), render); }
+  else if (e.key === 'e' || e.key === 'E') { if (rels.length === 1) openEditor(rels[0]); }
+  else if (e.key === 'm' || e.key === 'M') { if (rels.length) await openMover(rels); }
+  else if (e.key === 'r' || e.key === 'R') { if (rels.length) await openRename(rels.map(baseName)); else await openRename([]); }
+  else if (e.key === 'Delete' && !inTrash() && rels.length) { e.preventDefault(); await trashRels(rels); }
+  else if (e.key === '?' ) setStatus('단축키: / 검색 · F 즐겨찾기 · E 편집 · M 이동 · R 이름 정리 · Delete 휴지통');
+});
+$('ed-save').onclick = async () => {
+  $('ed-save').disabled = true;
+  edProgress('저장 중…');
+  try {
+    const res = await fetch('/api/edit/save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: ed.rel, params: ed.params }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    $('editor').close();
+    if (state.filter?.has(baseName(ed.rel))) state.filter.add(data.name);  // the copy belongs to the same result set
+    await refresh();
+    setStatus(`저장됨: ${data.name}`);
+  } catch (error) {
+    edNote(`저장 실패: ${error.message}`, 8000);
+  } finally {
+    $('ed-save').disabled = false;
+  }
+};
+$('edit-open').onclick = () => openEditor([...state.selected][0]);
+// buttons must not keep focus after a mouse click, or Space/Enter would press them again instead of the viewer keys
+for (const id of ['viewer-actions', 'viewer-prev', 'viewer-next', 'viewer-stars', 'slide-toggle', 'viewer-compare']) $(id).addEventListener('mousedown', e => e.preventDefault());
+$('viewer-edit').onclick = () => openEditor(join(state.dir, viewer.file.name));
+$('viewer-prev').onclick = () => navigateViewer(-1);
+$('viewer-next').onclick = () => navigateViewer(1);
+$('viewer-fav').onclick = toggleViewerFavorite;
+$('viewer-trash').onclick = trashViewerFile;
+$('viewer-move').onclick = moveViewerFile;
+$('viewer-rename').onclick = renameViewerFile;
+addEventListener('resize', () => { layoutPreview(); drawBox(); });
+
+// splitter
+$('splitter').addEventListener('pointerdown', e => {
+  const sp = $('splitter');
+  sp.setPointerCapture(e.pointerId);
+  sp.classList.add('drag');
+  sp.onpointermove = ev => document.body.style.setProperty('--left', `${Math.min(600, Math.max(140, ev.clientX))}px`);
+  sp.onpointerup = () => { sp.onpointermove = null; sp.classList.remove('drag'); layoutGrid(); };
+});
+new ResizeObserver(() => layoutGrid()).observe($('grid-wrap'));
+
+load(location.hash.length > 1 ? decodeURIComponent(location.hash.slice(1)) : localStorage.getItem('lastDir') || '');
+// installable app + offline browsing of what was seen (service workers need https or localhost)
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
