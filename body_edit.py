@@ -760,6 +760,42 @@ def limb_thickness_warp(rgb_arr, pose_px, mask_arr, edits):
     return warped, warnings, float(np.abs(disp_x).max() + np.abs(disp_y).max())
 
 
+def leg_band(arr):
+    """(top, bottom) rows of the band resize_legs() resamples. Raises DetectionError when the photo is no full-body shot."""
+    h = arr.shape[0]
+    with LOCK:
+        pose_px, _, _ = detect(np.ascontiguousarray(arr[:, :, :3]))
+    hip_mid = (np.asarray(pose_px[L_HIP], dtype=float) + pose_px[R_HIP]) / 2
+    ankle_mid = (np.asarray(pose_px[L_ANKLE], dtype=float) + pose_px[R_ANKLE]) / 2
+    hip, ankle = hip_mid[1], ankle_mid[1]
+    leg = ankle_mid - hip_mid
+    # standing only (front, side or back view alike, the checks use left/right averages and vertical positions):
+    # hips above ankles, legs near vertical, knees between hips and ankles, feet at similar heights
+    standing = (0 <= hip < ankle <= h - 1 and ankle - hip >= h * 0.1
+                and abs(leg[0]) <= np.tan(np.radians(25)) * leg[1]
+                and all(hip < pose_px[k][1] < ankle + 0.1 * (ankle - hip) for k in (L_KNEE, R_KNEE))
+                and abs(pose_px[L_ANKLE][1] - pose_px[R_ANKLE][1]) <= 0.3 * (ankle - hip))
+    if not standing:
+        raise DetectionError("서 있는 전신 사진이 아니에요 (엉덩이부터 발목까지 곧게 서 있어야 해요).")
+    # ponytail: fixed fraction, tune if hems/skirts get stretched
+    return int(round(hip + 0.15 * (ankle - hip))), int(round(ankle))
+
+
+def resize_legs(arr, pct):
+    """yunaviewer: lengthen/shorten legs by pct% by resampling the whole horizontal band from just under the hips
+    down to the ankles (legs *and* background), so nothing is warped locally and straight background lines stay
+    straight. Torso and feet keep their size; the image gets taller/shorter by the band's change.
+    arr: (H, W, 3|4) uint8. Raises DetectionError when no full-body pose is found."""
+    if not np.isfinite(pct) or abs(pct) > MAX_EDIT_PCT:
+        raise ValueError(f"다리 길이는 ±{MAX_EDIT_PCT:g}% 범위여야 합니다.")
+    arr = np.ascontiguousarray(arr)
+    h, w = arr.shape[:2]
+    top, bottom = leg_band(arr)
+    new = max(1, round((bottom - top) * (1 + pct / 100.0)))
+    band = cv2.resize(arr[top:bottom], (w, new), interpolation=cv2.INTER_AREA if new < bottom - top else cv2.INTER_CUBIC)
+    return np.concatenate([arr[:top], band.reshape(new, w, -1), arr[bottom:]])
+
+
 FEET = [L_ANKLE, R_ANKLE, L_HEEL, R_HEEL, L_FOOT, R_FOOT]
 
 

@@ -233,6 +233,8 @@
   .cell .star.on { color: #ffd54d; }
   .cell .best { position: absolute; right: 8px; bottom: 8px; background: #d4a017; color: #111; font-weight: 700;
     border-radius: 999px; padding: 1px 8px; font-size: 12px; pointer-events: none; }
+  .cell .outfit-count { position: absolute; left: 8px; top: 40px; background: #24456e; border: 1px solid var(--accent);
+    border-radius: 999px; padding: 1px 8px; font-size: 12px; pointer-events: none; }
   .cell .stack { position: absolute; left: 8px; bottom: 8px; background: rgba(0,0,0,.6); border-radius: 999px;
     padding: 1px 8px; font-size: 12px; pointer-events: none; }
   #list .fav { color: #ffd54d; flex: none; }
@@ -336,6 +338,9 @@
     border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #dir-list button:hover { background: #262626; }
   #dir-list button.sel { background: #24456e; }
+  #rename-outfits { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; font-size: 13px; }
+  #rename-outfits label { display: flex; align-items: center; gap: 8px; }
+  #rename-outfits input { flex: 1; max-width: 320px; }
   #rename-table { width: 100%; border-collapse: collapse; font-size: 13px; }
   #rename-table td { padding: 4px 6px; border-bottom: 1px solid #262626; word-break: break-all; }
   #rename-table td:first-child { color: var(--dim); }
@@ -403,6 +408,7 @@
     <button type="button" data-act="trash">🗑 휴지통</button>
     <button type="button" data-act="move">📁 이동</button>
     <button type="button" data-act="rename">✎ 이름 정리</button>
+    <button type="button" data-act="outfit" title="선택한 사진을 같은 의상으로 분류 (AI 색인된 사진, 업로드 없음)">👗 같은 의상</button>
     <button type="button" data-act="compare" title="2~4장 나란히 비교">⧉ 비교</button>
     <span id="sel-stars" title="선택한 사진 별점 (✕ 지우기)"></span>
     <button type="button" data-act="restore">↩ 복원</button>
@@ -437,6 +443,7 @@
       <input id="viewer-note" maxlength="200" placeholder="메모 (Enter 저장)" autocomplete="off"></div>
     <div id="viewer-play"><button id="slide-toggle" title="슬라이드쇼 (P)">▶ 슬라이드쇼</button>
       <select id="slide-interval" title="넘김 간격"><option value="2">2초</option><option value="3">3초</option><option value="5">5초</option><option value="10">10초</option></select>
+      <button id="viewer-outfit" title="같은 의상 사진만 ←/→로 넘기기 (O)" hidden>👗 같은 의상</button>
       <button id="viewer-compare" title="원본과 편집본 나란히 비교">⧉ 비교</button></div>
     <div id="viewer-hint">← → 이동 · Space 선택 · F ★ · 1~5 별점 (0 지우기) · P 슬라이드쇼 · E 편집 · Del 휴지통 · ↑↓ 편집본</div></div>
 </dialog>
@@ -484,7 +491,7 @@
 
 <dialog id="renamer">
   <div class="panel-head"><h2>이름 정리 (myshare 형식)</h2></div>
-  <div class="panel-body"><table id="rename-table"></table><div id="rename-note" class="panel-note"></div></div>
+  <div class="panel-body"><div id="rename-outfits"></div><table id="rename-table"></table><div id="rename-note" class="panel-note"></div></div>
   <div class="panel-foot"><span id="rename-info"></span>
     <button id="rename-cancel">취소</button><button id="rename-ok" class="primary" disabled>이름 바꾸기</button></div>
 </dialog>
@@ -520,6 +527,8 @@
     <div class="row"><button id="ed-erase-mode" title="잡티나 자국을 붓으로 칠하면 주변으로 메웁니다">🩹 지우기 모드</button>
       <span id="ed-erase-count" style="font-size:12px; color:var(--dim)"></span><button id="ed-erase-clear" hidden>모두 취소</button></div>
     <label class="slider" id="ed-brush-wrap" hidden>붓 크기<output></output><input type="range" id="ed-brush" min="4" max="60" step="1" value="14"></label>
+    <div id="ed-legs-wrap" hidden><h3>다리 길이 (전신 사진)</h3>
+    <label class="slider" title="엉덩이 아래부터 발목까지 배경째 세로로 늘이거나 줄입니다. 먼저 하고 자르기는 나중에 하세요 (자르기 값이 초기화됩니다).">줄이기 ↔ 늘이기<output id="ed-legs-out">0%</output><input type="range" id="ed-legs" min="-30" max="30" step="1" value="0"></label></div>
     <div id="ed-body-wrap" hidden><h3>체형 (프롬프트로 조정)</h3><div class="row" id="ed-body"></div></div>
     <div id="ed-shape-wrap" hidden><h3>얼굴 형태 (프롬프트로 조정)</h3><div class="row" id="ed-shape"></div></div>
     <div class="row" id="ed-history"><button id="ed-undo" disabled title="실행 취소 (Ctrl+Z)">↶ 실행 취소</button><button id="ed-redo" disabled title="다시 실행 (Ctrl+Shift+Z)">↷ 다시 실행</button></div>
@@ -554,7 +563,7 @@ async function load(dir) {
     return setStatus(`폴더를 열 수 없습니다 (${res.status})`, 'error');
   }
   const wasTrash = inTrash();
-  Object.assign(state, await res.json(), { filter: null, best: null, indexComplete: false, indexRunning: false });
+  Object.assign(state, await res.json(), { filter: null, best: null, outfitOpen: null, indexComplete: false, indexRunning: false });
   if (wasTrash !== inTrash()) state.selected.clear();  // trash picks make no sense outside it (and vice versa)
   setStatus('');
   masonry.target = BATCH;
@@ -852,7 +861,36 @@ function sortFiles(files) {
 function displayItems() {
   let files = sortFiles(visibleFiles());
   if (state.onlyFav) files = files.filter(f => f.fav);
-  if (!state.group) return files;
+  return outfitView(state.group ? stackEdits(files) : files);
+}
+// "같은 의상" view (a choice of the sort menu, per folder): one photo per outfit token, the newest, with the outfit's
+// size in outfitCount; opening it (state.outfitOpen) lists just that outfit. Photos without a token stay as they are.
+const outfitViewOn = () => !inTrash() && !!JSON.parse(localStorage.getItem('outfitByDir') || '{}')[state.dir];
+function setOutfitView(on) {
+  const saved = JSON.parse(localStorage.getItem('outfitByDir') || '{}');
+  saved[state.dir] = on;
+  localStorage.setItem('outfitByDir', JSON.stringify(saved));
+  state.outfitOpen = null;
+  masonry.target = BATCH;
+  render();
+  $('grid-wrap').scrollTop = 0;
+}
+function outfitView(items) {
+  if (!outfitViewOn()) return items;
+  if (state.outfitOpen) return items.filter(f => outfitKey(f) === state.outfitOpen);
+  const groups = new Map(), out = [];
+  for (const f of items) {
+    const key = outfitKey(f);
+    if (!key) { out.push(f); continue; }
+    groups.set(key, [...(groups.get(key) || []), f]);
+  }
+  for (const group of groups.values()) {
+    const newest = group.reduce((a, b) => (b.mtime ?? 0) > (a.mtime ?? 0) ? b : a);
+    out.push(group.length > 1 ? { ...newest, outfitCount: group.length, outfitFiles: group } : newest);
+  }
+  return out.sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0));
+}
+function stackEdits(files) {
   const stems = new Map(files.filter(f => !EDIT_RE.test(f.name)).map(f => [f.name.replace(/\.[^.]+$/, ''), f]));
   const versions = new Map(), items = [];
   for (const f of files) {
@@ -916,12 +954,19 @@ function renderPath() {
     }), { className: `tool${inTrash() ? ' on' : ''}${state.trashed ? ' full' : ''}` }));
   // in the trash only the 🗑 button (the way back) is offered; nothing else applies to deleted photos
   const sort = currentSort();
-  const sortSelect = build('select', { id: 'sort-key', title: '정렬 기준', onchange: e => setSort({ ...currentSort(), key: e.target.value }) },
-    SORTS.map(([key, label]) => build('option', { value: key, textContent: label, selected: key === sort.key }, [])));
+  const sortSelect = build('select', { id: 'sort-key', title: '정렬 기준', onchange: e => {
+      if (e.target.value === 'outfit') return setOutfitView(true);
+      if (outfitViewOn()) setOutfitView(false);
+      setSort({ ...currentSort(), key: e.target.value });
+    } },
+    [...SORTS, ['outfit', '같은 의상']].map(([key, label]) => build('option', { value: key, textContent: label,
+      selected: key === (outfitViewOn() ? 'outfit' : sort.key) }, [])));
   const sortDir = build('button', { id: 'sort-dir', className: 'tool', textContent: sort.desc ? '↓' : '↑',
     title: sort.desc ? '내림차순 (클릭하면 오름차순)' : '오름차순 (클릭하면 내림차순)',
     onclick: () => setSort({ ...currentSort(), desc: !currentSort().desc }) }, []);
-  const sortBox = build('span', { id: 'sort-box', hidden: inTrash() }, [sortSelect, sortDir]);
+  const outfitBack = state.outfitOpen && outfitViewOn() ? [build('button', { textContent: '← 의상 목록',
+    title: '의상 목록으로 돌아가기', onclick: () => { state.outfitOpen = null; masonry.target = BATCH; render(); $('grid-wrap').scrollTop = 0; } }, [])] : [];
+  const sortBox = build('span', { id: 'sort-box', hidden: inTrash() }, [sortSelect, ...outfitBack, sortDir]);
   const tools = inTrash() ? [trashButton] : [
     tool('↻', '새로고침 (폴더에 추가·삭제된 사진 반영)', false, reloadFolder),
     Object.assign(tool('✨', '현재 폴더 AI 색인 + 이름 정리', false, startAiIndex), { id: 'ai-index' }),
@@ -1027,9 +1072,9 @@ function renderList() {
   }
   const files = build('div', { className: 'files' }, []);
   for (const f of state.items) {
-    const rel = join(state.dir, f.name), sel = state.selected.has(rel);
+    const rel = join(state.dir, f.name), sel = isSelected(f);
     const box = build('input', { type: 'checkbox', checked: sel,
-      onclick: e => { e.stopPropagation(); toggleSelect(rel); } }, []);
+      onclick: e => { e.stopPropagation(); toggleItem(f); } }, []);
     const thumb = build('img', { className: 'mini', src: thumbUrl(rel, f.mtime), loading: 'lazy', alt: '' }, []);
     const fav = f.fav ? [build('span', { className: 'fav', textContent: '★' }, [])] : [];
     if (listMode === 'thumbs') {
@@ -1077,8 +1122,8 @@ function appendCells() {
     const c = heights.findIndex(v => v <= lowest + colW * 0.1);
     const h = colW * f.h / f.w;
     const rel = join(state.dir, f.name);
-    const check = build('button', { className: 'check', textContent: '✓', title: '선택',
-      onclick: e => { e.stopPropagation(); toggleSelect(rel); } }, []);
+    const check = build('button', { className: 'check', textContent: '✓', title: f.outfitCount ? `이 의상 ${f.outfitCount}장 모두 선택` : '선택',
+      onclick: e => { e.stopPropagation(); toggleItem(f); } }, []);
     const star = build('button', { className: 'star' + (f.fav ? ' on' : ''), textContent: f.fav ? '★' : '☆', title: '즐겨찾기',
       onclick: e => {
         e.stopPropagation();
@@ -1089,9 +1134,10 @@ function appendCells() {
           renderList();
         });
       } }, []);
-    const cell = build('div', { className: 'cell' + (state.selected.has(rel) ? ' sel' : ''), title: f.name,
-      onclick: () => openViewer(f) },
+    const cell = build('div', { className: 'cell' + (isSelected(f) ? ' sel' : ''), title: f.name,
+      onclick: () => f.outfitCount ? openOutfit(f) : openViewer(f) },
       [build('img', { src: thumbUrl(rel, f.mtime), loading: 'lazy', alt: f.name }, []), check, star,
+       ...(f.outfitCount ? [build('span', { className: 'outfit-count', textContent: `👗 ${f.outfitCount}장` }, [])] : []),
        ...(f.versions?.length ? [build('span', { className: 'stack', textContent: `✎ ${f.versions.length}` }, [])] : []),
        ...(state.best === f.name ? [build('span', { className: 'best', textContent: '⭐ 베스트' }, [])] : []),
        ...(f.rating ? [build('span', { className: 'rating', textContent: '★'.repeat(f.rating) }, [])] : []),
@@ -1105,6 +1151,13 @@ function appendCells() {
   fillViewport();
 }
 
+function openOutfit(f) {
+  state.outfitOpen = outfitKey(f);
+  masonry.target = BATCH;
+  render();
+  $('grid-wrap').scrollTop = 0;
+}
+
 function fillViewport() {
   const wrap = $('grid-wrap');
   if (masonry.shown < state.items.length && wrap.scrollTop + wrap.clientHeight * 2 > wrap.scrollHeight) {
@@ -1113,6 +1166,17 @@ function fillViewport() {
   }
 }
 $('grid-wrap').addEventListener('scroll', fillViewport, { passive: true });
+
+// the files a click on this item selects: the whole outfit behind a "👗 N장" thumbnail, else the file itself
+function selectionOf(f) {
+  return (f.outfitFiles ? f.outfitFiles.flatMap(m => [m, ...(m.versions || [])]) : [f]).map(m => join(state.dir, m.name));
+}
+const isSelected = f => selectionOf(f).every(rel => state.selected.has(rel));
+function toggleItem(f) {
+  const rels = selectionOf(f), on = !rels.every(rel => state.selected.has(rel));
+  for (const rel of rels) on ? state.selected.add(rel) : state.selected.delete(rel);
+  render();
+}
 
 function toggleSelect(rel) {
   state.selected.has(rel) ? state.selected.delete(rel) : state.selected.add(rel);
@@ -1255,8 +1319,13 @@ function renderViewerBar() {
   if (document.activeElement !== $('viewer-note')) $('viewer-note').value = f.note || '';
   $('viewer-compare').hidden = viewer.files.length < 2;
   $('viewer-compare').textContent = `⧉ 비교 (${Math.min(4, viewer.files.length)})`;
-  $('viewer-prev').disabled = viewer.index <= 0;
-  $('viewer-next').disabled = viewer.index >= state.items.length - 1;
+  const group = outfitIndices(), at = group.indexOf(viewer.index);
+  if (group.length < 2) viewer.outfit = false;  // nothing to step through any more
+  $('viewer-outfit').hidden = group.length < 2;
+  $('viewer-outfit').classList.toggle('on', !!viewer.outfit);
+  $('viewer-outfit').textContent = viewer.outfit ? `👗 같은 의상 ${at + 1}/${group.length}` : `👗 같은 의상 ${group.length}장`;
+  $('viewer-prev').disabled = viewer.outfit ? at <= 0 : viewer.index <= 0;
+  $('viewer-next').disabled = viewer.outfit ? at >= group.length - 1 : viewer.index >= state.items.length - 1;
 }
 
 // ★★★☆☆ buttons; clicking the current rating again clears it
@@ -1373,10 +1442,26 @@ $('compare-close').onclick = () => $('compare').close();
 addEventListener('resize', () => { if ($('compare').open) layoutCompare(); });
 $('viewer-compare').onclick = () => { setSlideshow(false); openCompare(viewer.files.map(f => join(state.dir, f.name))); };
 
+// same outfit = same outfit token in the myshare file name, within this folder; no upload involved
+const outfitKey = item => item?.name.match(NAME_RE)?.[2].toLowerCase() || null;
+// grid indices of the current photo's outfit (in grid order); [] when the photo has no outfit token
+function outfitIndices() {
+  const key = outfitKey(state.items[viewer.index]);
+  return key ? state.items.flatMap((item, i) => outfitKey(item) === key ? [i] : []) : [];
+}
 function navigateViewer(step) {
-  const index = viewer.index + step;
+  let index = viewer.index + step;
+  if (viewer.outfit) {
+    const group = outfitIndices();
+    index = group[group.indexOf(viewer.index) + step] ?? -1;
+  }
   if (index >= 0 && index < state.items.length) showViewer(index);
 }
+function toggleViewerOutfit() {
+  viewer.outfit = !viewer.outfit && outfitIndices().length > 1;
+  renderViewerBar();
+}
+$('viewer-outfit').onclick = toggleViewerOutfit;
 
 function toggleViewerFavorite() {
   const f = viewer.file, rel = join(state.dir, f.name);
@@ -1428,6 +1513,8 @@ addEventListener('keydown', async e => {
     // trashed photos can only be looked at, restored or deleted (their buttons are hidden too)
   } else if (/^[0-5]$/.test(e.key)) {
     setMarks([rel], { rating: Number(e.key) });
+  } else if (e.key === 'o' || e.key === 'O') {
+    toggleViewerOutfit();
   } else if (e.key === 'p' || e.key === 'P') {
     setSlideshow(!slide.timer);
   } else if (e.key === 'f' || e.key === 'F') {
@@ -1631,6 +1718,7 @@ function updateSelActions() {
     const trashOnly = ['restore', 'delete'].includes(b.dataset.act);
     b.hidden = inTrash() ? !trashOnly : trashOnly;
     if (b.dataset.act === 'compare') b.hidden ||= n < 2 || n > 4;
+    if (b.dataset.act === 'outfit') b.hidden ||= n < 2;
     if (b.dataset.act === 'fav') b.textContent = allFav ? '☆ 즐겨찾기 해제' : '★ 즐겨찾기';
   }
 }
@@ -1645,6 +1733,17 @@ $('sel-actions').addEventListener('click', async e => {
     else if (act === 'move') await openMover(rels);
     else if (act === 'rename') await openRename(rels.map(baseName));
     else if (act === 'compare') openCompare(rels);
+    else if (act === 'outfit') {
+      const answer = prompt('의상 이름을 직접 정하려면 영문으로 입력하세요 (예: blackpinkfloralminidress).\n비워 두면 AI가 짓습니다.', '');
+      if (answer === null) return;  // cancelled: nothing is changed
+      const typed = answer.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (answer.trim() && typed.length < 2) return setStatus('의상 이름은 영문 소문자·숫자 2자 이상이어야 해요.', 'error');
+      const data = await api('/api/outfit/merge', { paths: rels });
+      state.tags = (await (await fetch(`/api/tags/list?dir=${enc(state.dir)}`)).json()).tags || state.tags;
+      setStatus(data.count ? `${data.count}장의 의상 설명을 ${data.base}에 맞췄어요. 파일명 미리보기를 엽니다…`
+                           : `설명은 이미 같았어요. 파일명을 같은 의상으로 맞추는 미리보기를 엽니다…`);
+      await openRename(rels.map(baseName), null, typed ? Object.fromEntries(rels.map(r => [baseName(r), typed])) : {});
+    }
     else if (act === 'restore') {
       const data = await api('/api/files/restore', { paths: rels });
       state.selected.clear();
@@ -1750,20 +1849,34 @@ $('groups-close').onclick = () => $('groups').close();
 
 // rename dialog: preview of myshare-style names, applied only after confirmation (and undoable)
 let renamePlan = [], renameDone = null;
-async function openRename(names, onDone = null) {
+// overrides: {file name: outfit token typed by the user}; those files are named without asking the model
+async function openRename(names, onDone = null, overrides = {}) {
   const note = $('rename-note'), table = $('rename-table');
   table.replaceChildren();
+  $('rename-outfits').replaceChildren();
   note.textContent = '이름을 만드는 중… (처음에는 이미지 설명을 만드느라 시간이 걸릴 수 있어요)';
   $('rename-ok').disabled = true;
   $('rename-info').textContent = '';
   renameDone = onDone;
   if (!$('renamer').open) $('renamer').showModal();
   try {
-    const data = await withIndexConsent(allow => api('/api/rename/plan', { dir: state.dir, names, allow_index: allow }));
+    const data = await withIndexConsent(allow => api('/api/rename/plan', { dir: state.dir, names, allow_index: allow, overrides }));
     renamePlan = data.plan;
     table.replaceChildren(...data.plan.map(item => build('tr', {}, [
       build('td', { textContent: item.name }, []), build('td', { textContent: '→' }, []),
       build('td', { textContent: item.new_name }, [])])));
+    // one editable outfit name per outfit; typing another one renames all of its photos (English letters and digits)
+    const byOutfit = new Map();
+    for (const item of data.plan) byOutfit.set(item.outfit, [...(byOutfit.get(item.outfit) || []), item.name]);
+    $('rename-outfits').replaceChildren(...[...byOutfit].map(([outfit, files]) => {
+      const input = build('input', { value: outfit, maxLength: 40, spellcheck: false, title: '영문 소문자·숫자 (Enter로 적용)' }, []);
+      input.onchange = () => {
+        const token = input.value.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (token.length < 2) { input.value = outfit; note.textContent = '의상 이름은 영문 소문자·숫자 2자 이상이어야 해요.'; return; }
+        if (token !== outfit) openRename(names, onDone, { ...overrides, ...Object.fromEntries(files.map(f => [f, token])) });
+      };
+      return build('label', {}, [`의상 이름 (${files.length}장)`, input]);
+    }));
     note.textContent = data.plan.length ? '' : '바꿀 파일이 없습니다.';
     $('rename-info').textContent = `${data.plan.length}개 변경` + (data.skipped.length ? ` · ${data.skipped.length}개 제외` : '');
     $('rename-ok').disabled = !data.plan.length;
@@ -1812,14 +1925,36 @@ for (const [key, label, min, max, step, def] of FACE_SLIDERS) {
   $('ed-face-sliders').append(build('label', { className: 'slider' }, [label, out, input]));
 }
 
-function setBase() {  // size of the photo after rotation, in which crop and stretch are expressed
+// leg length (ed.params.legs, %) resizes the photo's height; the server reports the new size, kept in ed.params.base
+function syncLegs() {
+  const legs = ed.params.legs || 0;
+  $('ed-legs').value = legs;
+  $('ed-legs-out').textContent = `${legs}%`;
+}
+$('ed-legs').oninput = () => { ed.params.legs = +$('ed-legs').value; $('ed-legs-out').textContent = `${ed.params.legs}%`; };
+$('ed-legs').onchange = () => { queuePreview(); commit(); };  // each value needs a pose detection: not while dragging
+$('ed-legs').ondblclick = () => { $('ed-legs').value = 0; $('ed-legs').oninput(); $('ed-legs').onchange(); };
+
+// the slider is shown only for full-body photos (local pose check; the result is cached server side)
+async function checkLegs() {
+  const { rot, flip } = ed.params.orient, key = ed.rel + rot + flip;
+  ed.legsKey = key;
+  $('ed-legs-wrap').hidden = true;
+  try {
+    const res = await fetch(`/api/edit/fullbody?path=${enc(ed.rel)}&rot=${rot}&flip=${flip ? 1 : 0}&v=${enc(ed.file.mtime)}`);
+    if (res.ok && key === ed.legsKey) $('ed-legs-wrap').hidden = !(await res.json()).fullbody;
+  } catch { /* stays hidden */ }
+}
+
+function setBase() {  // size of the photo after rotation and leg length, in which crop and stretch are expressed
+  if (ed.params.legs && ed.params.base) { ed.base = ed.params.base; return; }
   const swap = ed.params.orient.rot % 180 === 90;
   ed.base = swap ? { w: ed.file.h, h: ed.file.w } : { w: ed.file.w, h: ed.file.h };
 }
 // the full photo in its current orientation (crop mode and hold-to-compare show it)
 function baseSrc() {
-  const { rot, flip } = ed.params.orient;
-  return rot || flip ? `/api/edit/base?path=${enc(ed.rel)}&rot=${rot}&flip=${flip ? 1 : 0}&v=${enc(ed.file.mtime)}` : imgUrl(ed.rel, ed.file.mtime);
+  const { rot, flip } = ed.params.orient, legs = ed.params.legs || 0;
+  return rot || flip || legs ? `/api/edit/base?path=${enc(ed.rel)}&rot=${rot}&flip=${flip ? 1 : 0}&legs=${legs}&v=${enc(ed.file.mtime)}` : imgUrl(ed.rel, ed.file.mtime);
 }
 // composition of the viewer's transform (mirror, then clockwise rotation) with a user action on the displayed image
 function orientBy(op) {
@@ -1831,7 +1966,10 @@ function orientBy(op) {
   else if (op === 'flipH') { flip = !flip; rot = (360 - rot) % 360; }
   else if (op === 'flipV') { flip = !flip; rot = (540 - rot) % 360; }
   ed.params.orient = { rot, flip };
+  ed.params.legs = 0; ed.params.base = null;  // the pose is detected upright: do the legs again after rotating
+  syncLegs();
   setBase();
+  checkLegs();
   ed.beforeKey = null;
   // crop and stretch are expressed in the rotated photo, so they start over
   setOutput({ x: 0, y: 0, w: ed.base.w, h: ed.base.h }, { w: ed.base.w, h: ed.base.h });
@@ -1992,6 +2130,7 @@ function restore(pos) {
   ed.hpos = pos;
   ed.params = JSON.parse(ed.history[pos]);
   setBase();
+  syncLegs();
   for (const [key, , , , , def] of SLIDERS) { $(`ed-${key}`).value = ed.params[key] ?? def; $(`ed-${key}`).oninput(); }
   for (const [key, , , , , def] of FACE_SLIDERS) { $(`ed-face-${key}`).value = ed.params.face[key] ?? def; $(`ed-face-${key}`).oninput(); }
   syncBgUI();
@@ -2160,9 +2299,11 @@ $('ed-apply-selected').onclick = () => {
 function resetEditor() {
   const { w, h } = ed.file;
   ed.zoom = 1;
-  ed.params = { crop: { x: 0, y: 0, w, h }, size: { w, h }, body: [], orient: { rot: 0, flip: false },
+  ed.params = { crop: { x: 0, y: 0, w, h }, size: { w, h }, body: [], orient: { rot: 0, flip: false }, legs: 0, base: null,
                 bg: { mode: 'none', amount: 0.5 }, face: { brightness: 1, tone: 0, smooth: 0 }, shape: {}, erase: [] };
   setBase();
+  syncLegs();
+  checkLegs();
   renderBody();
   renderShape();
   renderErase();
@@ -2383,6 +2524,16 @@ function queuePreview() {
       if (amend) ed.history[ed.hpos] = JSON.stringify(ed.params);
       return;  // setOutput asked for a new preview with the new crop
     }
+    const [bw, bh] = (res.headers.get('X-Base-Size') || '').split('x').map(Number);  // missing on a server older than the page
+    if (bw && (ed.params.legs || ed.params.base) && (bw !== ed.base.w || bh !== ed.base.h)) {  // leg length changed the photo's size
+      const amend = ed.history[ed.hpos] === JSON.stringify(ed.params);
+      ed.params.base = ed.params.legs ? { w: bw, h: bh } : null;
+      setBase();
+      edNote('다리 길이가 바뀌어 자르기·크기 값을 초기화했어요.', 6000);
+      setOutput({ x: 0, y: 0, w: bw, h: bh }, { w: bw, h: bh });  // asks for a new preview
+      if (amend) ed.history[ed.hpos] = JSON.stringify(ed.params);
+      return;
+    }
     const blob = await res.blob();
     if (seq !== ed.seq) return;
     if (ed.preview) URL.revokeObjectURL(ed.preview);
@@ -2407,7 +2558,7 @@ function updateCompare() {
   else if (on) loadBefore();
 }
 async function loadBefore() {
-  const params = { crop: ed.params.crop, size: ed.params.size, orient: ed.params.orient };
+  const params = { crop: ed.params.crop, size: ed.params.size, orient: ed.params.orient, legs: ed.params.legs };
   const key = ed.rel + JSON.stringify(params);
   if (key === ed.beforeKey) return;
   ed.beforeKey = key;
@@ -2575,7 +2726,7 @@ $('ed-save').onclick = async () => {
 };
 $('edit-open').onclick = () => openEditor([...state.selected][0]);
 // buttons must not keep focus after a mouse click, or Space/Enter would press them again instead of the viewer keys
-for (const id of ['viewer-actions', 'viewer-prev', 'viewer-next', 'viewer-stars', 'slide-toggle', 'viewer-compare']) $(id).addEventListener('mousedown', e => e.preventDefault());
+for (const id of ['viewer-actions', 'viewer-prev', 'viewer-next', 'viewer-stars', 'slide-toggle', 'viewer-compare', 'viewer-outfit']) $(id).addEventListener('mousedown', e => e.preventDefault());
 $('viewer-edit').onclick = () => openEditor(join(state.dir, viewer.file.name));
 $('viewer-prev').onclick = () => navigateViewer(-1);
 $('viewer-next').onclick = () => navigateViewer(1);

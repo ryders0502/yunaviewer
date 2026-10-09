@@ -728,6 +728,22 @@ def outfit_token(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", (value or "").lower())[:60]
 
 
+def distinct_token(token: str, description: str, taken: set[str]) -> str:
+    """A token not in `taken`, made of `token` plus words of the outfit description it does not name yet
+    (colours first, then the rest in reading order); letters as the last resort."""
+    words = [w for w in re.findall(r"[a-z0-9]+", (description or "").lower()) if w not in _STOP and w not in token]
+    words.sort(key=lambda w: w not in COLOR_FAMILIES)  # stable: colours first, reading order kept
+    candidate = token
+    for word in words:
+        candidate = outfit_token(word + candidate)[:40]
+        if candidate not in taken:
+            return candidate
+    for letter in "bcdefghijklmnopqrstuvwxyz":
+        if (candidate + letter)[:40] not in taken:
+            return (candidate + letter)[:40]
+    return candidate
+
+
 def prefix_token(folder_name: str) -> str:
     return "".join(c.lower() for c in folder_name.strip() if c.isalnum() or c in "_-").strip("_-") or "img"
 

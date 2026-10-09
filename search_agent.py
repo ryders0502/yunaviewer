@@ -110,7 +110,7 @@ class EditOutput(BaseModel):
 
 class OutfitToken(BaseModel):
     id: str
-    token: str = Field(pattern=r"^[a-z0-9]{2,30}$")
+    token: str = Field(pattern=r"^[a-z0-9]{2,40}$")
 
 
 class OutfitTokens(BaseModel):
@@ -206,17 +206,21 @@ def search(request_path: Path) -> BaseModel:
         prompt = (
             "Name outfit clusters for photo file names. Each cluster is one outfit (description of a "
             "representative photo, and how many photos). Give every cluster a short lowercase English "
-            "alphanumeric token without spaces or punctuation, 2-30 characters: color + main garment, at most "
+            "alphanumeric token without spaces or punctuation, 2-40 characters: color + main garment, at most "
             "two garments, e.g. 'blueromper', 'whiteshirtminiskirt', 'redknitdress', 'whitebikini', "
-            "'blacklacelingerie', 'nude'. Leave out details such as ties, trims, logos, necklines, accents and "
+            "'blacklacelingerie', 'nude'. Leave out minor details such as ties, trims, logos, necklines and "
             "brands. A matching top and bottom is one item ('whitebikini', not 'whitebikinitopwhitebikinibottom'). "
+            "But clusters of the same kind of garment must never share a token: tell them apart by the base "
+            "color, the print or pattern and its colors, and the cut when needed, e.g. 'blackpinkfloralminidress' "
+            "vs 'beigefloralminidress' vs 'whitelaceslipdress'. Never use a token listed in Taken. "
             "Use correctly spelled English words. Clusters that show the same outfit get the same token: the "
             "file names already carry sequence numbers, so never add suffixes such as alt, one, two or digits to "
             "make tokens unique. Clusters that really differ get tokens that name the visible difference (color "
             "or garment). If a cluster is clearly the same outfit as one of the known tokens (compare the "
             "descriptions), reuse that token exactly.\n"
             f"Clusters: {json.dumps(request['clusters'], ensure_ascii=False)}\n"
-            f"Known tokens: {json.dumps(request['known'], ensure_ascii=False)}"
+            f"Known tokens: {json.dumps(request['known'], ensure_ascii=False)}\n"
+            f"Taken: {json.dumps(request.get('taken', []))}"
         )
         output_model = OutfitTokens
     elif mode == "enhance":

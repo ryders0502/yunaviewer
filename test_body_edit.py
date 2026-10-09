@@ -43,6 +43,39 @@ def main() -> None:
     widths = [int((out[y, :, 0] > 127).sum()) for y in (60, 100, 140)]
     assert not warn and all(46 <= w <= 50 for w in widths), widths  # 40 * 1.2 = 48 at every height
     assert int((out[5, :, 0] > 127).sum()) == 40  # tapers back to the original beyond the joint
+
+    # resize_legs: band hip+15%..ankle is resampled, rows above and below stay as they were
+    img = np.arange(200, dtype=np.uint8)[:, None, None].repeat(40, 1).repeat(3, 2)  # row y holds value y
+    pose = np.zeros((33, 2))
+    pose[body_edit.L_HIP] = pose[body_edit.R_HIP] = (20, 40)
+    pose[body_edit.L_ANKLE] = pose[body_edit.R_ANKLE] = (20, 160)  # band rows 58..160 (102 rows)
+    pose[body_edit.L_KNEE] = pose[body_edit.R_KNEE] = (20, 100)
+    real_detect, body_edit.detect = body_edit.detect, lambda rgb: (pose, None, None)
+    try:
+        longer = body_edit.resize_legs(img, 20)
+        assert longer.shape[0] == 200 + round(102 * 0.2) and (longer[:58] == img[:58]).all()
+        assert (longer[-40:] == img[-40:]).all()
+        shorter = body_edit.resize_legs(np.dstack([img, img[:, :, :1]]), -20)  # RGBA input keeps its channels
+        assert shorter.shape == (200 - round(102 * 0.2), 40, 4), shorter.shape
+        def rejected():
+            try:
+                body_edit.resize_legs(img, 10)
+            except body_edit.DetectionError:
+                return True
+            return False
+        pose[body_edit.L_ANKLE] = pose[body_edit.R_ANKLE] = (20, 50)  # ankles right under the hips
+        assert rejected()
+        pose[body_edit.L_ANKLE] = pose[body_edit.R_ANKLE] = (20, 160)
+        pose[body_edit.L_KNEE] = pose[body_edit.R_KNEE] = (20, 30)  # knees above the hips: sitting/folded
+        assert rejected()
+        pose[body_edit.L_KNEE] = pose[body_edit.R_KNEE] = (20, 100)
+        pose[body_edit.L_ANKLE] = (20, 90)  # one foot raised: not standing
+        assert rejected()
+        pose[body_edit.L_ANKLE] = (20, 160)
+        pose[body_edit.R_ANKLE] = (220, 160)  # legs far from vertical (sitting, legs forward)
+        assert rejected()
+    finally:
+        body_edit.detect = real_detect
     print("ok")
 
 

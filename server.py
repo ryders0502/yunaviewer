@@ -646,12 +646,40 @@ def load_base(path_str: str, rot: int, flip: bool) -> Image.Image:
     return effects.orient(img, rot, flip)
 
 
+@functools.lru_cache(maxsize=2)
+def oriented(path_str: str, mtime_ns: int, rot: int, flip: bool, legs: float) -> Image.Image:
+    """load_base() plus the leg length resize (legs = pct, 0 = off). Cached, so callers must not modify it."""
+    img = load_base(path_str, rot, flip)
+    if not legs:
+        return img
+    import numpy as np
+    import body_edit
+
+    try:
+        return Image.fromarray(body_edit.resize_legs(np.array(img), legs))
+    except body_edit.DetectionError as error:
+        raise ValueError(f"다리 길이 보정 실패: {error}") from None
+
+
+@functools.lru_cache(maxsize=64)
+def is_full_body(path_str: str, mtime_ns: int, rot: int, flip: bool) -> bool:
+    """Whether hips down to ankles are in the (oriented) photo, so the leg length slider makes sense. Local only."""
+    import numpy as np
+    import body_edit
+
+    try:
+        body_edit.leg_band(np.array(oriented(path_str, mtime_ns, rot, flip, 0).convert("RGB")))
+    except body_edit.DetectionError:
+        return False
+    return True
+
+
 @functools.lru_cache(maxsize=4)
-def body_warped(path_str: str, mtime_ns: int, rot: int, flip: bool, body_json: str) -> Image.Image:
+def body_warped(path_str: str, mtime_ns: int, rot: int, flip: bool, legs: float, body_json: str) -> Image.Image:
     import numpy as np
     import body_edit  # mediapipe/opencv live in .venv only, so import on first use
 
-    img = load_base(path_str, rot, flip)
+    img = oriented(path_str, mtime_ns, rot, flip, legs)
     alpha = img.getchannel("A") if img.mode == "RGBA" else None
     rgb = np.array(img.convert("RGB"))
     try:
@@ -683,12 +711,12 @@ def merge_body(current: list, update: list) -> list:
 
 
 @functools.lru_cache(maxsize=2)
-def detection(path_str: str, mtime_ns: int, rot: int, flip: bool, body_json: str):
+def detection(path_str: str, mtime_ns: int, rot: int, flip: bool, legs: float, body_json: str):
     """(person mask, face landmarks or None) of the oriented, body-warped photo at full resolution."""
     import numpy as np
     import body_edit
 
-    img = body_warped(path_str, mtime_ns, rot, flip, body_json) if body_json != "[]" else load_base(path_str, rot, flip)
+    img = body_warped(path_str, mtime_ns, rot, flip, legs, body_json) if body_json != "[]" else oriented(path_str, mtime_ns, rot, flip, legs)
     rgb = np.ascontiguousarray(np.array(img.convert("RGB")))
     try:
         with body_edit.LOCK:
@@ -699,12 +727,12 @@ def detection(path_str: str, mtime_ns: int, rot: int, flip: bool, body_json: str
 
 
 @functools.lru_cache(maxsize=4)
-def face_points(path_str: str, mtime_ns: int, rot: int, flip: bool, body_json: str):
+def face_points(path_str: str, mtime_ns: int, rot: int, flip: bool, legs: float, body_json: str):
     """Face landmarks of the oriented, body-warped photo (face model only, so close-ups work), or None."""
     import numpy as np
     import body_edit
 
-    img = body_warped(path_str, mtime_ns, rot, flip, body_json) if body_json != "[]" else load_base(path_str, rot, flip)
+    img = body_warped(path_str, mtime_ns, rot, flip, legs, body_json) if body_json != "[]" else oriented(path_str, mtime_ns, rot, flip, legs)
     with body_edit.LOCK:
         return body_edit.detect_face(np.ascontiguousarray(np.array(img.convert("RGB"))))
 
@@ -731,6 +759,18 @@ def background_params(params: dict) -> tuple[str, float]:
     return mode, min(max(float(bg.get("amount", 0.5)), 0.0), 1.0)
 
 
+def legs_param(params: dict) -> float:
+    import body_edit
+
+    try:
+        pct = float(params.get("legs") or 0)
+    except (TypeError, ValueError):
+        raise ValueError("다리 길이 수치가 올바르지 않습니다.") from None
+    if not -body_edit.MAX_EDIT_PCT <= pct <= body_edit.MAX_EDIT_PCT:  # also rejects NaN
+        raise ValueError(f"다리 길이는 ±{body_edit.MAX_EDIT_PCT:g}% 범위여야 합니다.")
+    return round(pct, 2)
+
+
 def orient_params(params: dict) -> tuple[int, bool]:
     orient = params.get("orient") or {}
     rot = int(orient.get("rot", 0)) % 360
@@ -741,8 +781,9 @@ def edit_image(path: Path, params: dict, max_side: int | None = None) -> Image.I
     rot, flip = orient_params(params)
     body = params.get("body") or []
     body_json = json.dumps(body, sort_keys=True)
-    key = (str(path), path.stat().st_mtime_ns, rot, flip)
-    img = body_warped(*key, body_json).copy() if body else load_base(str(path), rot, flip)
+    key = (str(path), path.stat().st_mtime_ns, rot, flip, legs_param(params))
+    img = (body_warped(*key, body_json) if body else oriented(*key)).copy()
+    base_size = img.size
     trim = img.info.get("trim_bottom", 0) if body else 0
     shape = shape_params(params)
     if shape:  # before tone/background, whose masks come from the unshaped photo (a few px off at most)
@@ -805,6 +846,7 @@ def edit_image(path: Path, params: dict, max_side: int | None = None) -> Image.I
     if alpha is not None:
         rgb.putalpha(alpha)
     rgb.info["trim_bottom"] = trim
+    rgb.info["base_size"] = base_size  # the photo before cropping: its size changes with the leg length
     return rgb
 
 
@@ -854,8 +896,8 @@ def edit_command(prompt: str, controls: dict, body: list, path: Path | None = No
     if path is not None and any(response.get(key) is not None for key in effects.SHAPE_KEYS):
         rot, flip = orient_params(params or {})
         body_json = json.dumps((params or {}).get("body") or [], sort_keys=True)
-        key = (str(path), path.stat().st_mtime_ns, rot, flip)
-        height = (body_warped(*key, body_json) if body_json != "[]" else load_base(str(path), rot, flip)).height
+        key = (str(path), path.stat().st_mtime_ns, rot, flip, legs_param(params or {}))
+        height = (body_warped(*key, body_json) if body_json != "[]" else oriented(*key)).height
         reason = effects.face_too_small(face_points(*key, body_json), height)
         if reason:
             for name in effects.SHAPE_KEYS:
@@ -946,46 +988,116 @@ def duplicate_groups(rel_dir: str) -> dict:
     return {"groups": library.find_duplicates(ROOT, paths, thumbnail, file_hash)}
 
 
-def rename_plan(rel_dir: str, names: list[str], allow_index: bool = False) -> dict:
-    """Propose myshare-style names for the given files (default: every file of the folder not yet in that form)."""
+OUTFIT_KEYS = ("onepiece", "top", "bottom", "outer")
+
+
+def merge_outfits(rels: list[str]) -> dict:
+    """The user says these photos show one outfit: copy the outfit description of the richest one (full body first,
+    as cluster_outfits picks) into the stored tags of the others, so albums, search and name cleanup group them.
+    Local only, nothing is sent anywhere. The replaced values are kept in tags["outfit_orig"]."""
+    paths = [safe_path(rel) for rel in rels]
+    if len(paths) < 2:
+        raise ValueError("같은 의상으로 묶으려면 사진을 2장 이상 선택하세요.")
+    if any(not p.is_file() or p.suffix.lower() not in IMAGE_EXTS for p in paths):
+        raise ValueError("이미지가 아닌 항목이 있습니다.")
+    tags = stored_tags(paths)
+    unindexed = [p.name for p in paths if p not in tags]
+    if unindexed:
+        raise ValueError(f"AI 색인이 안 된 사진이 있어요 ({len(unindexed)}장). 색인 후 다시 시도하세요.")
+    base = max(paths, key=lambda p: (tags[p].get("visible") == "fullbody",
+                                     sum(len(part) for part in library._outfit_parts(tags[p]))))
+    outfit = {key: tags[base][key] for key in OUTFIT_KEYS if tags[base].get(key)}
+    changed = {}
+    for path in paths:
+        if path == base or all(tags[path].get(key) == value for key, value in outfit.items()):
+            continue
+        new = dict(tags[path])
+        new.setdefault("outfit_orig", {key: tags[path].get(key) for key in OUTFIT_KEYS})
+        new.update(outfit)
+        changed[path] = new
+    if changed:
+        store_tags(changed)
+    return {"count": len(changed), "base": base.name}
+
+
+def name_clusters(clusters: list, known: list[dict], taken: list[str]) -> dict[str, str]:
+    """Ask the model for a file-name token per outfit cluster: {"C1": token, ...}."""
+    job_dir = ROOT / ".yunaviewer" / "jobs" / uuid.uuid4().hex
+    try:
+        response = call_agent(job_dir, {
+            "mode": "outfit_token", "model": SEARCH_MODEL, "references": [], "known": known, "taken": taken,
+            "clusters": [{"id": f"C{i}", "description": library.outfit_description(c[0][1]), "count": len(c)}
+                         for i, c in enumerate(clusters, 1)]})
+    finally:
+        shutil.rmtree(job_dir, ignore_errors=True)
+    return {str(t.get("id")): library.outfit_token(t.get("token", "")) for t in response.get("tokens", [])}
+
+
+def rename_plan(rel_dir: str, names: list[str], allow_index: bool = False, overrides: dict | None = None) -> dict:
+    """Propose myshare-style names for the given files (default: every file of the folder not yet in that form).
+    overrides {file name: outfit token} are the user's own outfit names: those files skip the model entirely."""
     directory = safe_path(rel_dir)
     images = {p.name: p for p in folder_images(directory)}
     targets = [images[n] for n in names if n in images] if names else [
         p for n, p in images.items() if library.needs_name(n)]
     if not targets:
         raise ValueError("이름을 정리할 이미지가 없습니다. (선택한 이미지가 없고 정리 안 된 파일도 없습니다)")
+    manual = {}
+    for name, token in (overrides or {}).items():
+        clean = library.outfit_token(str(token))
+        if name in images and clean:
+            if len(clean) < 2:
+                raise ValueError("의상 이름은 영문 소문자·숫자 2자 이상이어야 합니다.")
+            manual[name] = clean
     ensure_described(targets, directory, allow_index)
     tags = stored_tags(targets)
-    entries = [(p.name, tags[p]) for p in targets if p in tags]
+    entries = [(p.name, tags[p]) for p in targets if p in tags and p.name not in manual]
     skipped = [p.name for p in targets if p not in tags]
-    if not entries:
+    items = [{"name": p.name, "outfit": manual[p.name], "shot": tags[p].get("visible")}
+             for p in targets if p in tags and p.name in manual]
+    if not entries and not items:
         raise ValueError(tag_status(directory)["error"] or "이미지 분석이 끝나지 않았습니다. 잠시 후 다시 시도하세요.")
 
-    all_tags = stored_tags(list(images.values()))
-    known = {}
-    for path in images.values():
-        match = library.FINAL_NAME_RE.fullmatch(path.name)
-        if match and path in all_tags:
-            known.setdefault(match.group("outfit").lower(), library.outfit_description(all_tags[path]))
-    clusters = library.cluster_outfits(entries)
-    job_dir = ROOT / ".yunaviewer" / "jobs" / uuid.uuid4().hex
-    try:
-        response = call_agent(job_dir, {
-            "mode": "outfit_token", "model": SEARCH_MODEL, "references": [],
-            "clusters": [{"id": f"C{i}", "description": library.outfit_description(c[0][1]), "count": len(c)}
-                         for i, c in enumerate(clusters, 1)],
-            "known": [{"token": token, "description": description} for token, description in known.items()]})
-    finally:
-        shutil.rmtree(job_dir, ignore_errors=True)
-    tokens = {str(t.get("id")): library.outfit_token(t.get("token", "")) for t in response.get("tokens", [])}
-    items = []
-    for i, cluster in enumerate(clusters, 1):
-        token = tokens.get(f"C{i}") or library.outfit_token(library.outfit_description(cluster[0][1]))[:24]
-        items += [{"name": name, "outfit": token, "shot": t.get("visible")} for name, t in cluster]
+    if entries:
+        target_names = {p.name for p in targets}
+        all_tags = stored_tags(list(images.values()))
+        known_tags = {}  # outfit token -> tags of a file that already carries it (files being renamed do not count)
+        for path in images.values():
+            match = library.FINAL_NAME_RE.fullmatch(path.name)
+            if match and path in all_tags and path.name not in target_names:
+                known_tags.setdefault(match.group("outfit").lower(), all_tags[path])
+        known = [{"token": t, "description": library.outfit_description(v)} for t, v in known_tags.items()]
+        clusters = library.cluster_outfits(entries)
+        tokens = name_clusters(clusters, known, [])
+        chosen = {i: tokens.get(f"C{i}") or library.outfit_token(library.outfit_description(c[0][1]))[:24]
+                  for i, c in enumerate(clusters, 1)}
+
+        def clashes(i: int) -> bool:
+            """Another outfit already owns this token (an earlier cluster, or a file that is a different outfit)."""
+            owner = known_tags.get(chosen[i])
+            return (any(chosen[j] == chosen[i] for j in range(1, i))
+                    or (owner is not None and not library.same_outfit(owner, clusters[i - 1][0][1])))
+
+        clashing = [i for i in chosen if clashes(i)]
+        if clashing:  # one more try, telling the model which tokens are taken; then fall back to description words
+            taken = [chosen[i] for i in chosen if i not in clashing] + list(known_tags)
+            retry = name_clusters([clusters[i - 1] for i in clashing], known, taken)
+            for n, i in enumerate(clashing, 1):
+                if retry.get(f"C{n}"):
+                    chosen[i] = retry[f"C{n}"]
+            used = {chosen[i] for i in chosen if i not in clashing} | set(known_tags)
+            for i in clashing:
+                if chosen[i] in used:
+                    chosen[i] = library.distinct_token(chosen[i], library.outfit_description(clusters[i - 1][0][1]), used)
+                used.add(chosen[i])
+        for i, cluster in enumerate(clusters, 1):
+            items += [{"name": name, "outfit": chosen[i], "shot": t.get("visible")} for name, t in cluster]
     items.sort(key=lambda item: item["name"])
     plan = library.plan_names(directory, items)
+    outfit_of = {item["name"]: library.outfit_token(item["outfit"]) for item in items}
+    plan = [{**entry, "outfit": outfit_of[entry["name"]]} for entry in plan]
     planned = {item["name"] for item in plan}
-    return {"plan": plan, "skipped": skipped + [e[0] for e in entries if e[0] not in planned]}
+    return {"plan": plan, "skipped": skipped + [i["name"] for i in items if i["name"] not in planned]}
 
 
 def rename_apply(rel_dir: str, plan: list[dict]) -> dict:
@@ -1101,13 +1213,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_json(image_metadata(rel))
             elif url.path == "/api/tags/list":
                 self.send_json({"tags": folder_tag_map(rel)})
+            elif url.path == "/api/edit/fullbody":
+                path = safe_path(rel)
+                if path.suffix.lower() not in IMAGE_EXTS or not path.is_file():
+                    raise FileNotFoundError(rel)
+                rot, flip = orient_params({"orient": {"rot": int(query.get("rot", ["0"])[0]),
+                                                      "flip": query.get("flip", ["0"])[0] == "1"}})
+                self.send_json({"fullbody": is_full_body(str(path), path.stat().st_mtime_ns, rot, flip)})
             elif url.path == "/api/edit/base":
                 path = safe_path(rel)
                 if path.suffix.lower() not in IMAGE_EXTS or not path.is_file():
                     raise FileNotFoundError(rel)
                 rot, flip = orient_params({"orient": {"rot": int(query.get("rot", ["0"])[0]),
                                                       "flip": query.get("flip", ["0"])[0] == "1"}})
-                base = load_base(str(path), rot, flip).convert("RGB")
+                base = oriented(str(path), path.stat().st_mtime_ns, rot, flip,
+                                legs_param({"legs": query.get("legs", ["0"])[0]})).convert("RGB")
                 base.thumbnail((2400, 2400))
                 buffer = io.BytesIO()
                 base.save(buffer, "JPEG", quality=90)
@@ -1176,6 +1296,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 rating = int(body["rating"]) if body.get("rating") is not None else None
                 note = str(body["note"]) if body.get("note") is not None else None
                 self.send_json({"count": library.set_marks(ROOT, paths, rating, note)})
+            elif self.path == "/api/outfit/merge":
+                self.send_json(merge_outfits([str(r) for r in body.get("paths", [])]))
             elif self.path == "/api/bestshot":
                 paths = [safe_path(r) for r in body.get("paths", [])]
                 if any(not p.is_file() or p.suffix.lower() not in IMAGE_EXTS for p in paths):
@@ -1205,7 +1327,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_json(library.undo_op(ROOT, str(body.get("id", ""))))
             elif self.path == "/api/rename/plan":
                 self.send_json(rename_plan(str(body.get("dir", "")), [str(n) for n in body.get("names", [])],
-                                           bool(body.get("allow_index"))))
+                                           bool(body.get("allow_index")), dict(body.get("overrides") or {})))
             elif self.path == "/api/rename/apply":
                 self.send_json(rename_apply(str(body.get("dir", "")), list(body.get("plan", []))))
             elif self.path in ("/api/edit/preview", "/api/edit/save", "/api/edit/auto"):
@@ -1225,6 +1347,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self.send_response(200)
                     self.send_header("Content-Type", "image/jpeg")
                     self.send_header("X-Trim-Bottom", str(preview.info.get("trim_bottom", 0)))
+                    self.send_header("X-Base-Size", "%dx%d" % preview.info["base_size"])
                     self.send_header("Content-Length", str(buffer.tell()))
                     self.end_headers()
                     self.wfile.write(buffer.getvalue())

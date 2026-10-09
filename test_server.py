@@ -275,6 +275,28 @@ def main() -> None:
         assert call("/api/dirs")[0] == 200
         httpd.shutdown()
 
+        # merge_outfits: the richest photo's outfit goes to the others, originals are kept, unindexed photos refuse
+        pair = [shop / n for n in ("pending_0.png", "pending_1.png")]
+        saved = {pair[0]: {"visible": "fullbody", "top": "red shirt", "bottom": "blue jeans", "onepiece": "none"},
+                 pair[1]: {"visible": "upperbody", "top": "crimson blouse", "outer": "none"}}
+        stored = {}
+        real_stored, real_store = server.stored_tags, server.store_tags
+        server.stored_tags = lambda paths: {p: saved[p] for p in paths if p in saved}
+        server.store_tags = stored.update
+        try:
+            result = server.merge_outfits([f"shop/{p.name}" for p in pair])
+            assert result == {"count": 1, "base": "pending_0.png"}, result
+            assert stored[pair[1]]["top"] == "red shirt" and stored[pair[1]]["bottom"] == "blue jeans"
+            assert stored[pair[1]]["outfit_orig"]["top"] == "crimson blouse" and pair[0] not in stored
+            saved.pop(pair[1])
+            try:
+                server.merge_outfits([f"shop/{p.name}" for p in pair])
+                raise AssertionError("merged an unindexed photo")
+            except ValueError:
+                pass
+        finally:
+            server.stored_tags, server.store_tags = real_stored, real_store
+
         server.stored_tags = lambda paths: {p: {"top": "blue shirt", "bottom": "black skirt", "visible": "fullbody",
                                                 "onepiece": "none", "outer": "none"} for p in paths}
         server.describe_images = lambda paths, status: None
@@ -295,6 +317,32 @@ def main() -> None:
         try:
             server.rename_apply("shop", [{"name": "../x.png", "new_name": "y.png"}])
             raise AssertionError("path in name")
+        except ValueError:
+            pass
+
+        # rename_plan: different outfits that the model names alike get told apart; a manual name skips the model
+        dark = {"visible": "fullbody", "onepiece": "dark floral print spaghetti strap mini dress", "top": "none", "bottom": "none", "outer": "none"}
+        pale = {**dark, "onepiece": "beige floral sleeveless ruffle mini dress"}
+        by_name = {"pending_0.png": dark, "pending_1.png": pale}
+        server.stored_tags = lambda paths: {p: by_name[p.name] for p in paths if p.name in by_name}
+        calls = []
+
+        def same_name(job_dir, request):
+            calls.append(request)
+            return {"tokens": [{"id": c["id"], "token": "floralminidress"} for c in request["clusters"]]}
+        server.invoke_agent = same_name
+        plan = server.rename_plan("shop", ["pending_0.png", "pending_1.png"])["plan"]
+        outfits = {p["name"]: p["outfit"] for p in plan}
+        assert len(calls) == 2 and "floralminidress" in calls[1]["taken"], calls
+        assert len(set(outfits.values())) == 2 and all("floralminidress" in o for o in outfits.values()), outfits
+        calls.clear()
+        plan = server.rename_plan("shop", ["pending_0.png", "pending_1.png"],
+                                  overrides={"pending_0.png": "Black Pink Dress!", "pending_1.png": "blackpinkdress"})["plan"]
+        assert not calls and {p["outfit"] for p in plan} == {"blackpinkdress"}, plan
+        assert [p["new_name"][-6:] for p in plan] == ["01.png", "02.png"], plan
+        try:
+            server.rename_plan("shop", ["pending_0.png"], overrides={"pending_0.png": "x"})
+            raise AssertionError("one-letter name accepted")
         except ValueError:
             pass
 
