@@ -184,6 +184,11 @@ def main() -> None:
         assert [len(c) for c in library.cluster_outfits([("r", rep), ("m", mid), ("f", far)])] == [3]
         black = one("wool knit long-sleeve soft", "black pants")
         assert sorted(len(c) for c in library.cluster_outfits([("r", rep), ("m", mid), ("b", black)])) == [1, 2]
+        # pairs for the AI photo check: alike but not matched; never a clashing pair
+        pairs = library.near_outfit_pairs([[("a", one("white wool turtleneck sweater"))],
+                                           [("b", one("ivory chunky cable pullover"))],
+                                           [("c", one("black wool turtleneck sweater"))]], 5)
+        assert pairs == [(0, 1)], pairs
         poses = {g["label"]: g["names"] for g in library.build_albums("pose", entries)}
         assert poses["서 있음"] == ["1", "2", "3"] and poses["앉아 있음"] == ["4"] and poses["누워 있음"] == ["5"]
         hair = {g["label"]: sorted(g["names"]) for g in library.build_albums("hair", entries)}

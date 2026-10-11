@@ -297,6 +297,29 @@ def main() -> None:
         finally:
             server.stored_tags, server.store_tags = real_stored, real_store
 
+        # check_outfits: look-alike groups go to the model once; a "no" is remembered, a "yes" merges the groups
+        def sweater(top, visible="upperbody"):
+            return {"visible": visible, "top": top, "bottom": "not visible", "onepiece": "none", "outer": "none"}
+        saved = {shop / "pending_0.png": sweater("white wool turtleneck sweater", "fullbody"),
+                 shop / "pending_1.png": sweater("ivory chunky cable pullover"),
+                 shop / "pending_2.png": sweater("black wool turtleneck sweater")}
+        real_agent = server.call_agent
+        server.stored_tags = lambda paths: {p: saved[p] for p in paths if p in saved}
+        server.store_tags = saved.update
+        try:
+            sent = []
+            server.call_agent = lambda job, request: sent.append(request) or {"verdicts": [{"pair": "P1", "same": False}]}
+            assert server.check_outfits("shop") == {"checked": 1, "merged": 0, "photos": 0, "remaining": 0}
+            assert sent[0]["mode"] == "outfit_pairs" and len(sent[0]["contact_sheets"]) == 1
+            assert server.check_outfits("shop")["checked"] == 0 and len(sent) == 1  # rejected pair is not asked again
+            server.checked_pairs_path().unlink()
+            server.call_agent = lambda job, request: {"verdicts": [{"pair": "P1", "same": True}]}
+            assert server.check_outfits("shop") == {"checked": 1, "merged": 1, "photos": 2, "remaining": 0}
+            assert saved[shop / "pending_1.png"]["top"] == "white wool turtleneck sweater"
+            assert saved[shop / "pending_2.png"]["top"] == "black wool turtleneck sweater"
+        finally:
+            server.stored_tags, server.store_tags, server.call_agent = real_stored, real_store, real_agent
+
         server.stored_tags = lambda paths: {p: {"top": "blue shirt", "bottom": "black skirt", "visible": "fullbody",
                                                 "onepiece": "none", "outer": "none"} for p in paths}
         server.describe_images = lambda paths, status: None

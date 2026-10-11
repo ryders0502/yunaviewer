@@ -518,6 +518,28 @@ def cluster_outfits(entries: list[tuple[str, dict]]) -> list[list[tuple[str, dic
     return clusters
 
 
+def near_outfit_pairs(clusters: list[list[tuple[str, dict]]], limit: int) -> list[tuple[int, int]]:
+    """Cluster pairs worth a look at the photos: no visible garment clashes, yet the wording (or the file-name
+    label, which came from the same descriptions) kept them apart. Most alike first (shared words of the main
+    garment), at most limit pairs."""
+    sigs = [{("", *_sig(tags)[1:]) for _, tags in cluster} for cluster in clusters]
+
+    def overlap(x: tuple, y: tuple) -> float:
+        a, b = _normalize(x[1]), _normalize(y[1])
+        return len(a & b) / min(len(a), len(b)) if a and b else 0.0
+
+    scored = []
+    for i in range(len(clusters)):
+        for j in range(i + 1, len(clusters)):
+            if any(_conflict_sig(x, y) for x in sigs[i] for y in sigs[j]):
+                continue
+            score = max(overlap(x, y) for x in sigs[i] for y in sigs[j])
+            if score >= 0.3:
+                scored.append((score, i, j))
+    scored.sort(key=lambda s: -s[0])
+    return [(i, j) for _, i, j in scored[:limit]]
+
+
 def outfit_description(tags: dict) -> str:
     parts = [tags.get(key, "") for key in ("onepiece", "top", "bottom", "outer")]
     return ", ".join(p for p in parts if p.strip().lower() not in _EMPTY and not p.lower().startswith("not visible"))

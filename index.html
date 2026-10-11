@@ -63,6 +63,7 @@
   #grid { position: relative; margin: 2px 2px 140px; }
   .cell { position: absolute; overflow: hidden; background: #222; cursor: zoom-in; }
   .cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #grid.square .cell img { object-position: top; }
   .cell .check { position: absolute; top: 8px; left: 8px; width: 26px; height: 26px; border-radius: 50%;
     border: 2px solid #fff; background: rgba(0,0,0,.35); opacity: 0; transition: opacity .15s; padding: 0;
     color: #fff; font-size: 14px; line-height: 22px; }
@@ -214,7 +215,7 @@
   #sort-box { display: flex; align-items: center; gap: 2px; }
   #sort-box[hidden] { display: none; }
   #sort-key { background: #1b1b1b; color: var(--text); border: 1px solid #333; border-radius: 6px; padding: 3px 6px; font: inherit; font-size: 13px; }
-  #pathbar #sort-dir { font-size: 15px; padding: 4px 8px; color: var(--dim); }
+  #pathbar #sort-dir, #pathbar .thumb-zoom { font-size: 15px; padding: 4px 8px; color: var(--dim); }
   #task-button { position: relative; }
   #task-button.busy { color: #fff; }
   #task-button.busy::after { content: attr(data-count); position: absolute; top: -3px; right: -3px; min-width: 15px; height: 15px;
@@ -966,7 +967,18 @@ function renderPath() {
     onclick: () => setSort({ ...currentSort(), desc: !currentSort().desc }) }, []);
   const outfitBack = state.outfitOpen && outfitViewOn() ? [build('button', { textContent: '← 의상 목록',
     title: '의상 목록으로 돌아가기', onclick: () => { state.outfitOpen = null; masonry.target = BATCH; render(); $('grid-wrap').scrollTop = 0; } }, [])] : [];
-  const sortBox = build('span', { id: 'sort-box', hidden: inTrash() }, [sortSelect, ...outfitBack, sortDir]);
+  const zoomOut = build('button', { className: 'tool thumb-zoom', textContent: '−', title: '썸네일 작게', onclick: () => zoomThumbs(false) }, []);
+  const zoomIn = build('button', { className: 'tool thumb-zoom', textContent: '+', title: '썸네일 크게', onclick: () => zoomThumbs(true) }, []);
+  const shape = build('button', { className: 'tool thumb-zoom', textContent: squareThumbs ? '◻' : '▯',
+    title: squareThumbs ? '정사각형 썸네일 (클릭하면 원본 비율)' : '원본 비율 썸네일 (클릭하면 정사각형)',
+    onclick: () => {
+      squareThumbs = !squareThumbs;
+      localStorage.setItem('squareThumbs', squareThumbs ? '1' : '0');
+      masonry.target = Math.max(masonry.target, masonry.shown);
+      layoutGrid();
+      renderPath();
+    } }, []);
+  const sortBox = build('span', { id: 'sort-box', hidden: inTrash() }, [sortSelect, ...outfitBack, sortDir, zoomOut, zoomIn, shape]);
   const tools = inTrash() ? [trashButton] : [
     tool('↻', '새로고침 (폴더에 추가·삭제된 사진 반영)', false, reloadFolder),
     Object.assign(tool('✨', '현재 폴더 AI 색인 + 이름 정리', false, startAiIndex), { id: 'ai-index' }),
@@ -1098,12 +1110,25 @@ function renderList() {
 // masonry rendered in batches: more cells are appended as the grid scrolls near the bottom
 const BATCH = 60;
 const masonry = { cols: 1, colW: 0, gap: 3, heights: [], shown: 0, target: BATCH };
+// target thumbnail width: the -/+ buttons next to the sort order remove/add one column (kept across reloads)
+let thumbWidth = Number(localStorage.getItem('thumbWidth')) || 300;
+// square thumbnails (cropped, top kept so faces show) or the photo's own aspect ratio
+let squareThumbs = localStorage.getItem('squareThumbs') === '1';
+function zoomThumbs(bigger) {
+  const cols = Math.min(12, Math.max(1, masonry.cols + (bigger ? -1 : 1)));
+  if (cols === masonry.cols) return;
+  thumbWidth = $('grid').clientWidth / cols;
+  localStorage.setItem('thumbWidth', thumbWidth);
+  masonry.target = Math.max(masonry.target, masonry.shown);  // keep what was already loaded
+  layoutGrid();
+}
 
 function layoutGrid() {
   const grid = $('grid');
+  grid.classList.toggle('square', squareThumbs);
   $('empty').hidden = state.items.length > 0;
   const width = grid.clientWidth;
-  masonry.cols = Math.max(1, Math.round(width / 300));
+  masonry.cols = Math.max(1, Math.round(width / thumbWidth));
   masonry.colW = (width - masonry.gap * (masonry.cols - 1)) / masonry.cols;
   masonry.heights = new Array(masonry.cols).fill(0);
   masonry.shown = 0;
@@ -1120,7 +1145,7 @@ function appendCells() {
     // size (1671 vs 1672 px) otherwise scatter a row in random order and newer ones land right of older ones
     const lowest = Math.min(...heights);
     const c = heights.findIndex(v => v <= lowest + colW * 0.1);
-    const h = colW * f.h / f.w;
+    const h = squareThumbs ? colW : colW * f.h / f.w;
     const rel = join(state.dir, f.name);
     const check = build('button', { className: 'check', textContent: '✓', title: f.outfitCount ? `이 의상 ${f.outfitCount}장 모두 선택` : '선택',
       onclick: e => { e.stopPropagation(); toggleItem(f); } }, []);
@@ -1832,8 +1857,28 @@ async function showGroups(title, url, labelOf, tag, kinds = []) {
 }
 function openAlbums(kind) {
   const kinds = [['outfit', '의상'], ['hair', '헤어'], ['pose', '자세']];
-  return showGroups('자동 앨범', `/api/albums?dir=${enc(state.dir)}&kind=${kind}`, g => g.label,
+  const shown = showGroups('자동 앨범', `/api/albums?dir=${enc(state.dir)}&kind=${kind}`, g => g.label,
     `앨범(${kinds.find(([k]) => k === kind)[1]})`, kinds.map(([k, label]) => [k, label, k === kind]));
+  if (kind === 'outfit') $('groups-kinds').append(build('button', { textContent: '🤖 AI 비교',
+    title: '설명만으로는 못 묶은 비슷한 의상을 사진으로 비교해서 같은 의상이면 묶습니다 (대표 사진이 Gemini로 전송됨)',
+    onclick: checkOutfits }, []));
+  return shown;
+}
+// on request only: representative photos of look-alike outfit groups go to the model, same ones are merged
+function checkOutfits() {
+  if (!confirm('비슷해 보이는 의상 묶음의 대표 사진(최대 16장)을 Gemini로 보내 같은 의상인지 확인할까요?')) return;
+  const dir = state.dir;
+  enqueueTask(`AI 의상 비교 · ${dir || 'root'}`, async progress => {
+    progress('사진 비교 중…');
+    const data = await api('/api/outfit/check', { dir });
+    const text = !data.checked ? '더 비교할 비슷한 의상 묶음이 없어요.'
+      : `${data.checked}쌍 비교: ${data.merged ? `${data.merged}개 묶음으로 합침 (${data.photos}장)` : '같은 의상 없음'}`
+        + (data.remaining ? ` · 남은 후보 ${data.remaining}쌍 (다시 누르면 이어서)` : '');
+    progress(text);
+    setStatus(text);
+    if (state.dir === dir) state.tags = (await (await fetch(`/api/tags/list?dir=${enc(dir)}`)).json()).tags || state.tags;
+    if ($('groups').open && state.dir === dir) openAlbums('outfit');
+  });
 }
 function openDuplicates() {
   const dir = state.dir;
@@ -2734,7 +2779,7 @@ $('viewer-fav').onclick = toggleViewerFavorite;
 $('viewer-trash').onclick = trashViewerFile;
 $('viewer-move').onclick = moveViewerFile;
 $('viewer-rename').onclick = renameViewerFile;
-addEventListener('resize', () => { layoutPreview(); drawBox(); });
+addEventListener('resize', () => { if ($('editor').open) { layoutPreview(); drawBox(); } });
 
 // splitter
 $('splitter').addEventListener('pointerdown', e => {

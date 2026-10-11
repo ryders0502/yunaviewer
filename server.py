@@ -1020,6 +1020,77 @@ def merge_outfits(rels: list[str]) -> dict:
     return {"count": len(changed), "base": base.name}
 
 
+OUTFIT_PAIRS_PER_CALL = 8  # one Gemini call per button press; press again for the next pairs
+
+
+def checked_pairs_path() -> Path:
+    return ROOT / ".yunaviewer" / "outfit_checked.json"
+
+
+def check_outfits(rel_dir: str) -> dict:
+    """On the user's request: show the model the representative photos of outfit clusters that look alike but did
+    not match on their descriptions, and merge the ones it calls the same outfit (as merge_outfits). Pairs it
+    rejects are remembered by content hash, so the next press asks about new pairs."""
+    directory = safe_path(rel_dir)
+    paths = folder_images(directory)
+    tags = stored_tags(paths)
+    by_name = {p.name: p for p in paths}
+    clusters = library.cluster_outfits([(p.name, search_tags(p, tags[p])) for p in paths if p in tags])
+    with TAGS_LOCK:
+        try:
+            checked = set(json.loads(checked_pairs_path().read_text(encoding="utf-8")))
+        except FileNotFoundError:
+            checked = set()
+
+    def pair_key(i: int, j: int) -> str:
+        return "|".join(sorted(file_hash(by_name[clusters[k][0][0]]) for k in (i, j)))
+
+    candidates = [(i, j) for i, j in library.near_outfit_pairs(clusters, len(clusters) ** 2)
+                  if pair_key(i, j) not in checked]
+    pairs = candidates[:OUTFIT_PAIRS_PER_CALL]
+    if not pairs:
+        return {"checked": 0, "merged": 0, "photos": 0, "remaining": 0}
+    reps = list(dict.fromkeys(k for pair in pairs for k in pair))
+    job_dir = ROOT / ".yunaviewer" / "jobs" / uuid.uuid4().hex
+    try:
+        request, id_map = chunk_request([by_name[clusters[k][0][0]] for k in reps], job_dir,
+                                        {"mode": "outfit_pairs", "model": SEARCH_MODEL})
+        image_id = {k: image for k, image in zip(reps, id_map)}
+        request["pairs"] = [{"id": f"P{n}", "a": image_id[i], "b": image_id[j]} for n, (i, j) in enumerate(pairs, 1)]
+        response = call_agent(job_dir, request)
+    finally:
+        shutil.rmtree(job_dir, ignore_errors=True)
+    same = {int(d.group()) for v in response.get("verdicts", [])
+            if v.get("same") is True and (d := re.search(r"\d+", str(v.get("pair"))))}
+
+    # clusters joined by confirmed pairs become one outfit each
+    parent = {k: k for k in reps}
+
+    def root(k: int) -> int:
+        while parent[k] != k:
+            k = parent[k]
+        return k
+
+    for n, (i, j) in enumerate(pairs, 1):
+        if n in same:
+            parent[root(j)] = root(i)
+    components: dict[int, list[int]] = {}
+    for k in reps:
+        components.setdefault(root(k), []).append(k)
+    merged = photos = 0
+    for members in components.values():
+        if len(members) > 1:
+            rels = [(directory / name).relative_to(ROOT).as_posix() for k in members for name, _ in clusters[k]]
+            merge_outfits(rels)
+            merged += 1
+            photos += len(rels)
+    with TAGS_LOCK:
+        checked |= {pair_key(i, j) for n, (i, j) in enumerate(pairs, 1) if n not in same}
+        checked_pairs_path().parent.mkdir(parents=True, exist_ok=True)
+        checked_pairs_path().write_text(json.dumps(sorted(checked)), encoding="utf-8")
+    return {"checked": len(pairs), "merged": merged, "photos": photos, "remaining": len(candidates) - len(pairs)}
+
+
 def name_clusters(clusters: list, known: list[dict], taken: list[str]) -> dict[str, str]:
     """Ask the model for a file-name token per outfit cluster: {"C1": token, ...}."""
     job_dir = ROOT / ".yunaviewer" / "jobs" / uuid.uuid4().hex
@@ -1296,6 +1367,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 rating = int(body["rating"]) if body.get("rating") is not None else None
                 note = str(body["note"]) if body.get("note") is not None else None
                 self.send_json({"count": library.set_marks(ROOT, paths, rating, note)})
+            elif self.path == "/api/outfit/check":
+                self.send_json(check_outfits(str(body.get("dir", ""))))
             elif self.path == "/api/outfit/merge":
                 self.send_json(merge_outfits([str(r) for r in body.get("paths", [])]))
             elif self.path == "/api/bestshot":
