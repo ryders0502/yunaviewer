@@ -33,6 +33,7 @@ import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items as staggeredItems
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.gestures.snapping.SnapPosition
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.lazy.items
@@ -98,6 +99,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -467,7 +469,6 @@ fun ViewerScreen(
     val mid = Int.MAX_VALUE / 2 / n * n
     val strip = rememberLazyListState(mid + start)
     val scope = rememberCoroutineScope()
-    val thumbPx = with(LocalDensity.current) { 52.dp.roundToPx() }
     var chrome by remember { mutableStateOf(true) }
     var editingNote by remember { mutableStateOf(false) }
     var wallpaperMenu by remember { mutableStateOf(false) }
@@ -486,25 +487,29 @@ fun ViewerScreen(
     val center by remember {
         derivedStateOf {
             val info = strip.layoutInfo
-            val mid2 = (info.viewportStartOffset + info.viewportEndOffset) / 2
-            info.visibleItemsInfo.minByOrNull { abs(it.offset + it.size / 2 - mid2) }?.index ?: (mid + start)
+            // item offsets are measured from the start of the content, i.e. after the padding
+            val middle = (info.viewportStartOffset + info.viewportEndOffset) / 2
+            info.visibleItemsInfo.minByOrNull { abs(it.offset + it.size / 2 - middle) }?.index ?: (mid + start)
         }
     }
+    // padding of half the strip puts the first/last item in the middle; scrolling to an item then centers it
+    val sidePad = (LocalConfiguration.current.screenWidthDp.dp - 52.dp) / 2
     suspend fun centerOn(index: Int, animate: Boolean) {
-        val width = snapshotFlow { strip.layoutInfo.viewportSize.width }.first { it > 0 }
-        val offset = -(width - thumbPx) / 2
-        if (animate) strip.animateScrollToItem(index, offset) else strip.scrollToItem(index, offset)
+        if (animate) strip.animateScrollToItem(index) else strip.scrollToItem(index)
     }
-    // dragging or flinging the strip moves the big photo along
+    // only a touch (drag, fling, tap on a thumbnail) moves the big photo along; centering the strip by code must not
+    var follow by remember { mutableStateOf(false) }
     LaunchedEffect(chrome) {
         if (!chrome) return@LaunchedEffect
+        launch { strip.interactionSource.interactions.collect { if (it is DragInteraction.Start) follow = true } }
+        launch { snapshotFlow { strip.isScrollInProgress }.collect { if (!it) follow = false } }
         snapshotFlow { center }.collect { c ->
-            if (strip.isScrollInProgress && c % n != pager.currentPage) pager.scrollToPage(c % n)
+            if (follow && c % n != pager.currentPage) pager.scrollToPage(c % n)
         }
     }
     // swiping the big photo moves the strip, by the shorter way round
     LaunchedEffect(page, chrome) {
-        if (!chrome || strip.isScrollInProgress) return@LaunchedEffect
+        if (!chrome || follow) return@LaunchedEffect
         val from = center
         val step = ((page - from % n) % n + n + n / 2) % n - n / 2
         centerOn(from + step, animate = from != mid + start)
@@ -536,7 +541,7 @@ fun ViewerScreen(
                     LazyRow(
                         state = strip,
                         flingBehavior = rememberSnapFlingBehavior(strip, SnapPosition.Center),
-                        contentPadding = PaddingValues(vertical = 8.dp),
+                        contentPadding = PaddingValues(horizontal = sidePad, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(3.dp),
                     ) {
                         items(Int.MAX_VALUE) { index ->
@@ -545,7 +550,7 @@ fun ViewerScreen(
                                 photos[index % n].uri, null,
                                 Modifier.size(52.dp).clip(shape)
                                     .then(if (index == center) Modifier.border(2.dp, Color.White, shape) else Modifier.alpha(0.55f))
-                                    .clickable { scope.launch { centerOn(index, animate = true) } },
+                                    .clickable { scope.launch { follow = true; centerOn(index, animate = true); follow = false } },
                                 contentScale = ContentScale.Crop,
                             )
                         }

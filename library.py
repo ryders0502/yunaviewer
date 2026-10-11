@@ -15,6 +15,7 @@ import shutil
 import threading
 import time
 import uuid
+from functools import lru_cache
 from fractions import Fraction
 from pathlib import Path
 
@@ -423,15 +424,23 @@ def _normalize(tokens: set[str]) -> set[str]:
 
 
 def _similar_garment(a: set[str], b: set[str]) -> bool:
-    """Same garment despite different wording: high word overlap, no conflicting colour family and no
-    conflicting garment type ("white oversized jersey with red graphics" vs "white branded jersey top")."""
-    if not a or not b:
-        return False
+    return _similar_cached(frozenset(a), frozenset(b))
+
+
+def _clash(a: set[str], b: set[str]) -> bool:
+    """Both name a colour (or a garment type) and the two share none: another garment, however alike the wording."""
     colors_a, colors_b = _families(a, COLOR_FAMILIES), _families(b, COLOR_FAMILIES)
     if colors_a and colors_b and not colors_a & colors_b:
-        return False  # another colour is another garment, however alike the wording
+        return True
     nouns_a, nouns_b = _families(a, GARMENT_FAMILIES), _families(b, GARMENT_FAMILIES)
-    if nouns_a and nouns_b and not nouns_a & nouns_b:
+    return bool(nouns_a and nouns_b and not nouns_a & nouns_b)
+
+
+@lru_cache(maxsize=65536)
+def _similar_cached(a: frozenset[str], b: frozenset[str]) -> bool:
+    """Same garment despite different wording: high word overlap, no conflicting colour family and no
+    conflicting garment type ("white oversized jersey with red graphics" vs "white branded jersey top")."""
+    if not a or not b or _clash(a, b):
         return False
     a, b = _normalize(a), _normalize(b)
     return _jaccard(a, b) >= 0.5 or len(a & b) / min(len(a), len(b)) >= 0.6
@@ -442,37 +451,70 @@ def _outfit_parts(tags: dict) -> tuple[set[str], set[str], set[str]]:
     return main, _tokens(tags.get("bottom", "")), _tokens(tags.get("outer", ""))
 
 
+def _sig(tags: dict) -> tuple:
+    """What the outfit comparison reads from a description: label and the three worn parts."""
+    return (tags.get("filename_outfit") or "", *map(frozenset, _outfit_parts(tags)))
+
+
+@lru_cache(maxsize=1 << 18)
+def _same_sig(a: tuple, b: tuple) -> bool:
+    if a[0] and a[0] == b[0]:
+        return True
+    if not _similar_garment(a[1], b[1]):
+        return False
+    return all(not (pa and pb) or _similar_garment(pa, pb) for pa, pb in zip(a[2:], b[2:]))
+
+
+@lru_cache(maxsize=1 << 18)
+def _conflict_sig(a: tuple, b: tuple) -> bool:
+    """Two photos that show different clothes: another file-name label, or a part visible in both that differs."""
+    if a[0] and b[0] and a[0] != b[0]:
+        return True
+    return any(_clash(pa, pb) for pa, pb in zip(a[1:], b[1:]))
+
+
 def same_outfit(a: dict, b: dict) -> bool:
     """Compare only what is visible in both photos; a dress never equals top + skirt. Photos carrying the same
     myshare outfit label (filename_outfit) are the same outfit whatever the wording of their descriptions."""
-    label_a, label_b = a.get("filename_outfit"), b.get("filename_outfit")
-    if label_a and label_a == label_b:
-        return True
-    main_a, bottom_a, outer_a = _outfit_parts(a)
-    main_b, bottom_b, outer_b = _outfit_parts(b)
-    if not _similar_garment(main_a, main_b):
-        return False
-    if bottom_a and bottom_b and not _similar_garment(bottom_a, bottom_b):
-        return False
-    if outer_a and outer_b and not _similar_garment(outer_a, outer_b):
-        return False
-    return True
+    return _same_sig(_sig(a), _sig(b))
 
 
 def cluster_outfits(entries: list[tuple[str, dict]]) -> list[list[tuple[str, dict]]]:
-    """Greedy clustering; richer descriptions (full body first) become cluster representatives."""
+    """Greedy clustering; richer descriptions (full body first) become cluster representatives. Then clusters that a
+    photo links together are merged (a full-body and a half-body shot only share what a middle shot shows), unless
+    some pair across them shows different clothes."""
     def richness(entry):
         tags = entry[1]
         return (tags.get("visible") == "fullbody", sum(len(p) for p in _outfit_parts(tags)))
 
     clusters: list[list[tuple[str, dict]]] = []
+    sigs: list[set[tuple]] = []  # the distinct descriptions in each cluster; comparing those is enough
     for entry in sorted(entries, key=richness, reverse=True):
-        for cluster in clusters:
-            if same_outfit(cluster[0][1], entry[1]):
+        sig = _sig(entry[1])
+        for cluster, group in zip(clusters, sigs):
+            if _same_sig(_sig(cluster[0][1]), sig):
                 cluster.append(entry)
+                group.add(sig)
                 break
         else:
             clusters.append([entry])
+            sigs.append({sig})
+
+    def linked(a: set[tuple], b: set[tuple]) -> bool:
+        return (any(_same_sig(x, y) for x in a for y in b)
+                and not any(_conflict_sig(x, y) for x in a for y in b))
+
+    i = 0
+    while i < len(clusters):
+        j = i + 1
+        while j < len(clusters):
+            if linked(sigs[i], sigs[j]):
+                clusters[i] = sorted(clusters[i] + clusters.pop(j), key=richness, reverse=True)
+                sigs[i] |= sigs.pop(j)
+                j = i + 1  # the bigger cluster may now link to one already passed
+            else:
+                j += 1
+        i += 1
     return clusters
 
 

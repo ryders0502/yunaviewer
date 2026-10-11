@@ -46,14 +46,18 @@ private fun normalize(tokens: Set<String>) = tokens.map {
     COLOR_FAMILIES[it]?.let { c -> "c:$c" } ?: GARMENT_FAMILIES[it]?.let { g -> "g:$g" } ?: STEMS[it] ?: it
 }.toSet()
 
-private fun similarGarment(a: Set<String>, b: Set<String>): Boolean {
-    if (a.isEmpty() || b.isEmpty()) return false
+/** Both name a colour (or a garment type) and the two share none: another garment, however alike the wording. */
+private fun clash(a: Set<String>, b: Set<String>): Boolean {
     val colorsA = families(a, COLOR_FAMILIES)
     val colorsB = families(b, COLOR_FAMILIES)
-    if (colorsA.isNotEmpty() && colorsB.isNotEmpty() && (colorsA intersect colorsB).isEmpty()) return false
+    if (colorsA.isNotEmpty() && colorsB.isNotEmpty() && (colorsA intersect colorsB).isEmpty()) return true
     val nounsA = families(a, GARMENT_FAMILIES)
     val nounsB = families(b, GARMENT_FAMILIES)
-    if (nounsA.isNotEmpty() && nounsB.isNotEmpty() && (nounsA intersect nounsB).isEmpty()) return false
+    return nounsA.isNotEmpty() && nounsB.isNotEmpty() && (nounsA intersect nounsB).isEmpty()
+}
+
+private fun similarGarment(a: Set<String>, b: Set<String>): Boolean {
+    if (a.isEmpty() || b.isEmpty() || clash(a, b)) return false
     val na = normalize(a)
     val nb = normalize(b)
     val common = (na intersect nb).size.toFloat()
@@ -92,7 +96,22 @@ data class OutfitEntry(val photo: Photo, val tags: JSONObject?, val label: Strin
     val groupable get() = tags != null || label != null || manual != null
 }
 
-/** Greedy clustering; richer descriptions (full body first) become cluster representatives. */
+/** Two photos that show different clothes: other hand-made group or file-name label, or a part visible in both that differs. */
+private fun conflict(a: OutfitEntry, b: OutfitEntry): Boolean {
+    if (a.manual != null || b.manual != null) return a.manual != b.manual
+    if (a.label != null && b.label != null && a.label != b.label) return true
+    val ta = a.tags ?: return false
+    val tb = b.tags ?: return false
+    val (mainA, bottomA, outerA) = parts(ta)
+    val (mainB, bottomB, outerB) = parts(tb)
+    return clash(mainA, mainB) || clash(bottomA, bottomB) || clash(outerA, outerB)
+}
+
+/**
+ * Greedy clustering; richer descriptions (full body first) become cluster representatives. Then clusters that a photo
+ * links together are merged (a full-body and a half-body shot only share what a middle shot shows), unless some pair
+ * across them shows different clothes.
+ */
 fun clusterOutfits(entries: List<OutfitEntry>): List<List<OutfitEntry>> {
     fun richness(e: OutfitEntry): Int {
         val t = e.tags ?: return 0
@@ -100,8 +119,32 @@ fun clusterOutfits(entries: List<OutfitEntry>): List<List<OutfitEntry>> {
         return (if (t.text("visible") == "fullbody") 10_000 else 0) + main.size + bottom.size + outer.size
     }
     val clusters = mutableListOf<MutableList<OutfitEntry>>()
+    // the distinct descriptions in each cluster: comparing those is enough, and stays fast with thousands of photos
+    val distinct = mutableListOf<MutableMap<List<Any?>, OutfitEntry>>()
+    fun key(e: OutfitEntry) = listOf(e.manual, e.label, e.tags?.let { parts(it) })
     for (entry in entries.sortedByDescending(::richness)) {
-        clusters.firstOrNull { sameOutfit(it[0], entry) }?.add(entry) ?: clusters.add(mutableListOf(entry))
+        val i = clusters.indexOfFirst { sameOutfit(it[0], entry) }
+        if (i >= 0) {
+            clusters[i].add(entry)
+            distinct[i].putIfAbsent(key(entry), entry)
+        } else {
+            clusters.add(mutableListOf(entry))
+            distinct.add(mutableMapOf(key(entry) to entry))
+        }
+    }
+    fun linked(a: Collection<OutfitEntry>, b: Collection<OutfitEntry>) =
+        a.any { x -> b.any { y -> sameOutfit(x, y) } } && a.none { x -> b.any { y -> conflict(x, y) } }
+    var i = 0
+    while (i < clusters.size) {
+        var j = i + 1
+        while (j < clusters.size) {
+            if (linked(distinct[i].values, distinct[j].values)) {
+                clusters[i] = (clusters[i] + clusters.removeAt(j)).sortedByDescending(::richness).toMutableList()
+                distinct.removeAt(j).forEach { (k, e) -> distinct[i].putIfAbsent(k, e) }
+                j = i + 1 // the bigger cluster may now link to one already passed
+            } else j++
+        }
+        i++
     }
     return clusters
 }

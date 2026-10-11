@@ -177,6 +177,13 @@ def main() -> None:
         # photos with the same myshare label match regardless of wording; different labels fall back to the text
         assert library.same_outfit({**jersey_a, "filename_outfit": "x"}, one("pink hoodie", filename_outfit="x"))
         assert not library.same_outfit({**jersey_a, "filename_outfit": "x"}, one("pink hoodie", filename_outfit="y"))
+        # a middle shot links two shots that do not match each other; a pair that disagrees on a part blocks the merge
+        rep = one("white oversized chunky cable knit wool turtleneck sweater", "blue jeans", visible="fullbody")
+        mid, far = one("wool turtleneck knit long-sleeve"), one("wool knit long-sleeve soft")
+        assert not library.same_outfit(rep, far) and library.same_outfit(rep, mid) and library.same_outfit(mid, far)
+        assert [len(c) for c in library.cluster_outfits([("r", rep), ("m", mid), ("f", far)])] == [3]
+        black = one("wool knit long-sleeve soft", "black pants")
+        assert sorted(len(c) for c in library.cluster_outfits([("r", rep), ("m", mid), ("b", black)])) == [1, 2]
         poses = {g["label"]: g["names"] for g in library.build_albums("pose", entries)}
         assert poses["서 있음"] == ["1", "2", "3"] and poses["앉아 있음"] == ["4"] and poses["누워 있음"] == ["5"]
         hair = {g["label"]: sorted(g["names"]) for g in library.build_albums("hair", entries)}

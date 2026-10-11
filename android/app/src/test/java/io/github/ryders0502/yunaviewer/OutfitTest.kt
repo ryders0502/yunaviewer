@@ -57,6 +57,19 @@ class OutfitTest {
     }
 
     @Test
+    fun middleShotLinksClusters() {
+        val rep = entry("white oversized chunky cable knit wool turtleneck sweater", "blue jeans", visible = "fullbody")
+        val mid = entry("wool turtleneck knit long-sleeve")
+        val far = entry("wool knit long-sleeve soft")
+        // far matches only the middle shot, yet all three are one outfit
+        assertFalse(sameOutfit(rep, far))
+        assertEquals(listOf(3), clusterOutfits(listOf(rep, mid, far)).map { it.size })
+        // a photo that disagrees on a part blocks the merge
+        val black = entry("wool knit long-sleeve soft", "black pants")
+        assertEquals(listOf(1, 2), clusterOutfits(listOf(rep, mid, black)).map { it.size }.sorted())
+    }
+
+    @Test
     fun outfitWordsInKorean() {
         assertEquals("검정 흰색 줄무늬 상의 반바지", outfitWords("blackwhitestripedtopshorts"))
         assertEquals("곰 니트 스웨터", outfitWords("bearknitsweater"))
